@@ -1,0 +1,792 @@
+/* ═══════════════════════════════════════════════════════════
+   SillyTavern-DynamicEvents — Styles
+   Popup modal + minimal drawer entry
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── Drawer (minimal) ─────────────────────────────── */
+
+.dynevt-drawer-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+}
+
+.dynevt-drawer-status {
+    flex: 1;
+    font-size: 0.78em;
+    color: var(--SmartThemeBodyColor, #888);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dynevt-drawer-button-row {
+    padding: 4px 0 2px;
+}
+
+.dynevt-manage-btn {
+    width: 100%;
+    white-space: nowrap;
+    justify-content: center;
+}
+
+/* ─── Overlay ──────────────────────────────────────── */
+
+.dynevt-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 9998;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+.dynevt-overlay.dynevt-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ─── Modal ────────────────────────────────────────── */
+
+.dynevt-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.95);
+    width: min(920px, 92vw);
+    height: min(700px, 88vh);
+    background: rgba(18, 18, 22, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    pointer-events: none;
+    overflow: hidden;
+}
+.dynevt-modal.dynevt-visible {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    pointer-events: auto;
+}
+
+/* ─── Modal Header ─────────────────────────────────── */
+
+.dynevt-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
+}
+
+.dynevt-modal-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.dynevt-modal-title i { color: rgba(200, 180, 120, 0.8); }
+
+.dynevt-modal-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.dynevt-header-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8em;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.dynevt-modal-close {
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 16px;
+    padding: 4px 6px;
+    margin-left: 6px;
+    transition: color 0.15s;
+}
+.dynevt-modal-close:hover { color: rgba(255, 255, 255, 0.8); }
+
+/* ─── Modal Body (two panels) ──────────────────────── */
+
+.dynevt-modal-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ─── Left Panel (Set List) ────────────────────────── */
+
+.dynevt-panel-left {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.dynevt-set-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    flex-shrink: 0;
+}
+
+.dynevt-set-list-title {
+    font-size: 0.82em;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.dynevt-set-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.dynevt-set-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.dynevt-set-row:hover { background: rgba(255, 255, 255, 0.03); }
+.dynevt-set-row.selected { background: rgba(100, 140, 220, 0.12); }
+.dynevt-set-row.inactive { opacity: 0.45; }
+
+.dynevt-set-toggle { flex-shrink: 0; }
+
+.dynevt-set-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.dynevt-set-name {
+    font-size: 0.88em;
+    color: rgba(255, 255, 255, 0.8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dynevt-set-meta {
+    font-size: 0.72em;
+    color: rgba(255, 255, 255, 0.35);
+}
+.dynevt-set-meta i { font-size: 0.8em; margin: 0 2px; }
+
+/* Secondary set indentation */
+.dynevt-set-row.dynevt-set-secondary {
+    padding-left: 24px;
+    border-left: 2px solid rgba(100, 140, 220, 0.25);
+    margin-left: 12px;
+}
+
+.dynevt-secondary-icon {
+    font-size: 0.7em;
+    color: rgba(100, 140, 220, 0.5);
+    margin-right: 3px;
+}
+
+.dynevt-select-sm { max-width: 110px; }
+
+/* Export picker secondary indentation */
+.dynevt-export-row-secondary { padding-left: 24px; }
+
+/* ─── Right Panel ──────────────────────────────────── */
+
+.dynevt-panel-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.dynevt-right-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    flex-shrink: 0;
+}
+
+#dynevt-char-picker-wrap {
+    /* no margin — spacing handled by parent row gap */
+}
+
+.dynevt-right-header-fields {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.dynevt-right-header-fields .dynevt-input:first-child { flex: 1; min-width: 160px; }
+.dynevt-right-header-fields .dynevt-select { width: auto; min-width: 140px; }
+
+.dynevt-events-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    flex-shrink: 0;
+    font-size: 0.82em;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.55);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.dynevt-events-area {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 10px;
+}
+
+/* ─── Event List (inside right panel) ──────────────── */
+
+.dynevt-event-list { }
+
+.dynevt-event-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    font-size: 0.88em;
+}
+.dynevt-event-row:hover { background: rgba(255, 255, 255, 0.02); }
+.dynevt-event-row.selected { background: rgba(120, 200, 140, 0.08); }
+
+/* Drag handle */
+.dynevt-drag-handle {
+    color: rgba(255, 255, 255, 0.15);
+    font-size: 0.78em;
+    cursor: grab;
+    flex-shrink: 0;
+    padding: 0 2px;
+    transition: color 0.15s;
+}
+.dynevt-drag-handle:active { cursor: grabbing; }
+.dynevt-event-row:hover .dynevt-drag-handle { color: rgba(255, 255, 255, 0.35); }
+
+/* Drag-in-progress states */
+.dynevt-event-row.dynevt-dragging { opacity: 0.35; }
+.dynevt-event-row.dynevt-drag-over-top { box-shadow: inset 0 2px 0 0 rgba(100, 140, 220, 0.7); }
+.dynevt-event-row.dynevt-drag-over-bottom { box-shadow: inset 0 -2px 0 0 rgba(100, 140, 220, 0.7); }
+
+.dynevt-event-toggle { flex-shrink: 0; }
+.dynevt-event-icon { font-size: 0.82em; color: rgba(255, 255, 255, 0.35); width: 16px; text-align: center; }
+.dynevt-event-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255, 255, 255, 0.75); }
+
+.dynevt-event-type {
+    font-size: 0.68em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.dynevt-event-status {
+    font-size: 0.68em;
+    color: rgba(255, 255, 255, 0.3);
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ─── Event Editor (inside right panel, below event list) ── */
+
+.dynevt-editor {
+    padding: 12px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-left: 2px solid rgba(100, 140, 220, 0.35);
+    background: rgba(0, 0, 0, 0.15);
+    margin-left: 4px;
+}
+
+.dynevt-editor-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+
+.dynevt-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 90px;
+}
+.dynevt-field > label {
+    font-size: 0.72em;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.dynevt-section-label {
+    font-size: 0.74em;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 8px 0 4px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ─── Phases ──────────────────────────────────────── */
+
+.dynevt-phase {
+    padding: 8px;
+    margin: 4px 0;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.dynevt-phase-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.dynevt-phase.collapsed .dynevt-phase-header {
+    margin-bottom: 0;
+}
+
+.dynevt-phase-collapse {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 0.78em;
+    width: 18px;
+    flex-shrink: 0;
+}
+.dynevt-phase-collapse:hover {
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.dynevt-phase-body {
+    padding-top: 2px;
+}
+
+/* ─── Shared Controls ─────────────────────────────── */
+
+.dynevt-btn {
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    font-size: 0.82em;
+    transition: background 0.15s;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.dynevt-btn:hover { background: rgba(255, 255, 255, 0.08); }
+
+.dynevt-btn-accent {
+    background: rgba(100, 140, 220, 0.15);
+    border-color: rgba(100, 140, 220, 0.25);
+    color: rgba(140, 175, 240, 0.9);
+}
+.dynevt-btn-accent:hover { background: rgba(100, 140, 220, 0.25); }
+
+.dynevt-btn-sm { padding: 2px 6px; font-size: 0.78em; }
+
+.dynevt-btn-icon {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+    padding: 2px 5px;
+    transition: color 0.15s;
+}
+.dynevt-btn-icon:hover { color: rgba(255, 80, 80, 0.8); }
+
+.dynevt-input, .dynevt-select, .dynevt-textarea {
+    background: rgba(0, 0, 0, 0.25);
+    color: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    padding: 5px 7px;
+    font-size: 0.88em;
+    font-family: inherit;
+    width: 100%;
+    box-sizing: border-box;
+}
+/* Normalize single-line inputs and selects to same height */
+.dynevt-input, .dynevt-select { height: 30px; }
+.dynevt-input:focus, .dynevt-select:focus, .dynevt-textarea:focus {
+    outline: none;
+    border-color: rgba(100, 140, 220, 0.35);
+}
+
+.dynevt-input-sm { width: auto; min-width: 60px; }
+.dynevt-input-xs { width: 50px; }
+
+.dynevt-textarea { resize: vertical; min-height: 40px; }
+.dynevt-textarea-sm { min-height: 32px; font-size: 0.84em; }
+
+.dynevt-empty {
+    text-align: center;
+    padding: 16px;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.84em;
+    font-style: italic;
+}
+.dynevt-empty-big {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+.hidden { display: none !important; }
+
+/* ─── Confirm Dialog (replaces browser confirm) ───── */
+
+.dynevt-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+.dynevt-confirm-overlay.dynevt-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.dynevt-confirm-box {
+    background: rgba(24, 24, 30, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 20px 24px;
+    min-width: 300px;
+    max-width: 440px;
+    transform: scale(0.95);
+    transition: transform 0.2s ease;
+}
+.dynevt-confirm-overlay.dynevt-visible .dynevt-confirm-box {
+    transform: scale(1);
+}
+
+.dynevt-confirm-msg {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.92em;
+    line-height: 1.45;
+    margin-bottom: 18px;
+}
+
+.dynevt-confirm-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.dynevt-btn-danger {
+    background: rgba(200, 60, 60, 0.2);
+    border-color: rgba(200, 60, 60, 0.35);
+    color: rgba(240, 110, 110, 0.95);
+}
+.dynevt-btn-danger:hover {
+    background: rgba(200, 60, 60, 0.35);
+}
+
+/* ─── Export Picker ───────────────────────────────── */
+
+.dynevt-export-box {
+    min-width: 360px;
+    max-width: 520px;
+}
+
+.dynevt-export-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.dynevt-export-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.dynevt-export-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.dynevt-export-set-name {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.88em;
+    flex: 1;
+}
+
+.dynevt-export-set-meta {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 0.74em;
+    white-space: nowrap;
+}
+
+.dynevt-export-actions {
+    margin-bottom: 12px;
+}
+
+/* ─── Condition Editor ─────────────────────────────── */
+
+.dynevt-condition {
+    margin-top: 2px;
+}
+
+.dynevt-condition-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+
+.dynevt-condition-invert {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.78em;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    white-space: nowrap;
+    padding-bottom: 5px;
+}
+
+.dynevt-phase-condition {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* ─── Character Picker (autocomplete + pills) ─────── */
+
+.dynevt-char-picker {
+    position: relative;
+    width: 100%;
+}
+
+.dynevt-char-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    padding: 4px 6px;
+    min-height: 32px;
+    cursor: text;
+}
+.dynevt-char-pills:focus-within {
+    border-color: rgba(100, 140, 220, 0.35);
+}
+
+.dynevt-char-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(100, 140, 220, 0.2);
+    border: 1px solid rgba(100, 140, 220, 0.3);
+    color: rgba(180, 200, 240, 0.9);
+    font-size: 0.82em;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.dynevt-char-pill-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    font-size: 12px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+    margin-left: 2px;
+}
+.dynevt-char-pill:hover .dynevt-char-pill-x {
+    opacity: 1;
+    color: rgba(255, 255, 255, 0.6);
+}
+.dynevt-char-pill-x:hover {
+    color: rgba(240, 100, 100, 0.95);
+    background: rgba(240, 100, 100, 0.15);
+}
+
+.dynevt-char-search {
+    flex: 1;
+    min-width: 120px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.86em;
+    font-family: inherit;
+    padding: 2px 4px;
+    outline: none;
+}
+.dynevt-char-search::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+}
+
+.dynevt-char-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    background: rgba(22, 22, 28, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: none;
+    border-radius: 0 0 3px 3px;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.dynevt-char-dropdown.visible {
+    display: block;
+}
+
+.dynevt-char-option {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 0.86em;
+    color: rgba(255, 255, 255, 0.75);
+    transition: background 0.1s;
+}
+.dynevt-char-option:hover {
+    background: rgba(100, 140, 220, 0.15);
+}
+
+.dynevt-char-avatar {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.88em;
+    font-style: italic;
+}
+
+.dynevt-char-no-match {
+    padding: 8px 10px;
+    font-size: 0.82em;
+    color: rgba(255, 255, 255, 0.3);
+    font-style: italic;
+    text-align: center;
+}
+
+
+/* ─── Scrollbars (explicit theme match) ───────────── */
+
+.dynevt-set-list,
+.dynevt-events-area,
+.dynevt-char-dropdown {
+    scrollbar-width: thin;
+    scrollbar-color: var(--SmartThemeUnderlineColor) transparent;
+}
+.dynevt-set-list::-webkit-scrollbar,
+.dynevt-events-area::-webkit-scrollbar,
+.dynevt-char-dropdown::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+    background-color: transparent;
+}
+.dynevt-set-list::-webkit-scrollbar-track,
+.dynevt-events-area::-webkit-scrollbar-track,
+.dynevt-char-dropdown::-webkit-scrollbar-track {
+    background-color: transparent;
+}
+.dynevt-set-list::-webkit-scrollbar-track:hover,
+.dynevt-events-area::-webkit-scrollbar-track:hover,
+.dynevt-char-dropdown::-webkit-scrollbar-track:hover {
+    background-color: var(--SmartThemeChatTintColor);
+    border-left: 1px solid var(--SmartThemeBorderColor);
+}
+.dynevt-set-list::-webkit-scrollbar-thumb,
+.dynevt-events-area::-webkit-scrollbar-thumb,
+.dynevt-char-dropdown::-webkit-scrollbar-thumb {
+    background-color: var(--SmartThemeUnderlineColor);
+}
+.dynevt-set-list::-webkit-scrollbar-thumb:hover,
+.dynevt-events-area::-webkit-scrollbar-thumb:hover,
+.dynevt-char-dropdown::-webkit-scrollbar-thumb:hover {
+    background-color: var(--SmartThemeQuoteColor);
+}
+.dynevt-set-list::-webkit-scrollbar-button,
+.dynevt-set-list::-webkit-scrollbar-corner,
+.dynevt-events-area::-webkit-scrollbar-button,
+.dynevt-events-area::-webkit-scrollbar-corner,
+.dynevt-char-dropdown::-webkit-scrollbar-button,
+.dynevt-char-dropdown::-webkit-scrollbar-corner {
+    display: none;
+    background: transparent;
+}
+
+/* Response Capture hint */
+.dynevt-hint {
+    font-size: 0.8em;
+    color: var(--SmartThemeBodyColor, #aaa);
+    opacity: 0.7;
+    padding: 2px 0 6px;
+}
+.dynevt-hint code {
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.95em;
+}
