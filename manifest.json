@@ -5,8 +5,8 @@
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "Cee & Claude",
+    "author": "mokimoko",
     "version": "0.1.0",
-    "homePage": "",
+    "homePage": "https://github.com/mokimoko/SillyTavern-DynamicEvents",
     "description": "Schedule-and-probability-triggered event injection system. Define event sets with recurring, one-shot, and plot-chain events that fire based on message count, intervals, and probability — replacing complex lorebook event hacks."
 }
