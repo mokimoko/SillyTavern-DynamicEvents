@@ -178,11 +178,19 @@ export function createCondition(overrides = {}) {
 
 /** Create fresh runtime state for an event */
 export function createEventState(event) {
+    const hasCondition = event.condition && event.condition.type !== ConditionType.NONE;
     const interval = randomInRange(event.schedule.intervalMin, event.schedule.intervalMax);
     return {
         lastFired: -Infinity,
-        nextEligible: event.schedule.initialDelay + interval,
+        // For unconditioned events, anchor the first window from chat start.
+        // For conditioned events, nextEligible is re-anchored when the condition
+        // first becomes true (see evaluateEvents), so this initial value is just
+        // a placeholder that will be overwritten.
+        nextEligible: hasCondition ? Infinity : event.schedule.initialDelay + interval,
         fireCount: 0,
+        // Tracks whether a conditioned event's gate has opened at least once.
+        // When it first opens, nextEligible is re-anchored from that moment.
+        conditionActivated: false,
         // One-shot
         spent: false,
         // Plot-chain
@@ -289,6 +297,20 @@ export function evaluateEvents(eventSets, chatState, currentCharacter, maxConcur
             if (!evaluateCondition(event.condition, chatState)) continue;
 
             const state = getEventState(chatState, event);
+
+            // Condition-activation anchor: the first time a conditioned event's
+            // gate opens, re-seed nextEligible from NOW so the interval counts
+            // from the moment the dependency was satisfied, not from chat start.
+            // The fireCount check also handles migration: old saved states lack
+            // conditionActivated, so without it we'd re-anchor events that
+            // already fired under the old semantics.
+            const hasCondition = event.condition && event.condition.type !== ConditionType.NONE;
+            if (hasCondition && !state.conditionActivated && state.fireCount === 0) {
+                state.conditionActivated = true;
+                const interval = randomInRange(event.schedule.intervalMin, event.schedule.intervalMax);
+                state.nextEligible = msgCount + event.schedule.initialDelay + interval;
+            }
+
             const result = evaluateSingleEvent(event, state, msgCount);
 
             if (result.shouldFire) {
@@ -503,6 +525,11 @@ export function getEventStatus(event, chatState) {
     }
 
     if (state.lastFired <= 0) {
+        // Conditioned events that haven't activated yet — condition gate not open
+        const hasCondition = event.condition && event.condition.type !== ConditionType.NONE;
+        if (hasCondition && !state.conditionActivated) {
+            return 'Waiting on condition';
+        }
         const remaining = state.nextEligible - msgCount;
         return remaining > 0 ? `First eligible in ~${remaining} msgs` : 'Ready to fire';
     }
