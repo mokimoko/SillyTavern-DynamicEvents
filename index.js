@@ -1824,5 +1824,5 @@ jQuery(async () => {
         toastr.warning('Dynamic Events: {{dynamicEvents}} macro unavailable in this ST version. Macro-mode events won\'t inject — switch them to Extension Prompt mode.', '', { timeOut: 12000 });
     }
 
-    console.log(LOG_PREFIX, 'Extension loaded');
+    debug('Extension loaded');
 });
