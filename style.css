@@ -1,7 +1,76 @@
 /* ═══════════════════════════════════════════════════════════
    SillyTavern-DynamicEvents — Styles
    Popup modal + minimal drawer entry
+   Theme-adaptive: surfaces keep frosted tint, accents + text follow
+   the active SillyTavern theme via --SmartTheme* tokens (light OR dark).
+   Prefix: dynevt-  (--de-* vars redefined onto the theme-adaptive layer)
    ═══════════════════════════════════════════════════════════ */
+
+/* ── Theme-adaptive variable layer ─────────────────────────
+   Self-contained (no shared import). Scoped to Dynamic Events'
+   top-level containers (NOT :root) so it can't collide with other
+   extensions' var blocks. The modal, overlay and confirm-overlay are
+   siblings, so all are listed. Semantic colors (danger red, the green
+   event-selected tint) stay handled at their call sites; dark scrims
+   stay dark on both themes.
+   ---------------------------------------------------------- */
+.dynevt-overlay,
+.dynevt-modal,
+.dynevt-confirm-overlay {
+    /* Surfaces — frosted theme tint */
+    --de-bg-modal: var(--SmartThemeBlurTintColor, rgba(18, 18, 22, 0.97));
+    --de-bg-confirm: var(--SmartThemeBlurTintColor, rgba(24, 24, 30, 0.98));
+    --de-surface: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 3%, transparent);
+    --de-surface-2: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 5%, transparent);
+    --de-surface-hover: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 8%, transparent);
+    /* Input inset — stays a dark scrim on both themes (fields read as recessed) */
+    --de-bg-input: rgba(0, 0, 0, 0.25);
+    /* Editor / phase panel tints — neutral, adapt per theme (was fixed black
+       scrims that turned muddy-gray on light themes). Tinting from the body
+       color reads as subtle depth on BOTH: gentle lift on dark, faint shade
+       on light. */
+    --de-bg-inset: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 5%, transparent);
+    --de-bg-inset-soft: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 3%, transparent);
+
+    /* Borders — follow theme body color */
+    --de-border: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 8%, transparent);
+    --de-border-soft: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 6%, transparent);
+    --de-border-faint: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 4%, transparent);
+    --de-border-hover: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 15%, transparent);
+
+    /* Text — follows the theme body color */
+    --de-text-strong: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 85%, transparent);
+    --de-text: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 75%, transparent);
+    --de-text-muted: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 55%, transparent);
+    --de-text-faint: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 35%, transparent);
+    --de-text-dim: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 25%, transparent);
+    --de-text-ghost: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 15%, transparent);
+
+    /* Accent — follows the theme quote color (was literal blue #648cdc) */
+    --de-accent: var(--SmartThemeQuoteColor, rgba(100, 140, 220, 1));
+    --de-accent-text: color-mix(in srgb, var(--SmartThemeQuoteColor, #8cafF0) 90%, var(--SmartThemeBodyColor, #fff));
+    --de-accent-wash: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 12%, transparent);
+    --de-accent-wash-strong: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 20%, transparent);
+    --de-accent-bg: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 15%, transparent);
+    --de-accent-bg-hover: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 25%, transparent);
+    --de-accent-border: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 25%, transparent);
+    --de-accent-border-soft: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 30%, transparent);
+    --de-accent-line: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 35%, transparent);
+    --de-accent-dim: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 50%, transparent);
+    --de-accent-strong: color-mix(in srgb, var(--SmartThemeQuoteColor, #648cdc) 70%, transparent);
+
+    /* Event-selected GREEN — semantic, stays clearly green but tone-adapts.
+       Mixing the theme body color in shifts brightness/mute per theme:
+       dark theme (light body) keeps it vivid; light theme (dark body) mutes it. */
+    --de-green-base: color-mix(in srgb, #78c88c 82%, var(--SmartThemeBodyColor, #fff) 18%);
+    --de-green-wash: color-mix(in srgb, var(--de-green-base) 12%, transparent);
+    --de-green-icon: color-mix(in srgb, var(--de-green-base) 80%, transparent);
+
+    /* Warm title accent (gold) — kept, tone-adapts the same way */
+    --de-gold: color-mix(in srgb, #c8b478 80%, var(--SmartThemeBodyColor, #fff) 20%);
+
+    --de-transition: all 0.15s ease;
+}
 
 /* ─── Drawer (minimal) ─────────────────────────────── */
 
@@ -57,8 +126,8 @@
     transform: translate(-50%, -50%) scale(0.95);
     width: min(920px, 92vw);
     height: min(700px, 88vh);
-    background: rgba(18, 18, 22, 0.97);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--de-bg-modal);
+    border: 1px solid var(--de-border);
     z-index: 9999;
     display: flex;
     flex-direction: column;
@@ -80,20 +149,20 @@
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--de-border-soft);
     flex-shrink: 0;
 }
 
 .dynevt-modal-title {
     font-size: 14px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--de-text-strong);
     letter-spacing: 0.3px;
     display: flex;
     align-items: center;
     gap: 8px;
 }
-.dynevt-modal-title i { color: rgba(200, 180, 120, 0.8); }
+.dynevt-modal-title i { color: var(--de-gold); }
 
 .dynevt-modal-header-controls {
     display: flex;
@@ -106,20 +175,20 @@
     align-items: center;
     gap: 4px;
     font-size: 0.8em;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--de-text-muted);
     cursor: pointer;
     white-space: nowrap;
 }
 
 .dynevt-modal-close {
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--de-text-faint);
     font-size: 16px;
     padding: 4px 6px;
     margin-left: 6px;
     transition: color 0.15s;
 }
-.dynevt-modal-close:hover { color: rgba(255, 255, 255, 0.8); }
+.dynevt-modal-close:hover { color: var(--de-text-strong); }
 
 /* ─── Modal Body (two panels) ──────────────────────── */
 
@@ -134,7 +203,7 @@
 .dynevt-panel-left {
     width: 240px;
     flex-shrink: 0;
-    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    border-right: 1px solid var(--de-border-soft);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -145,14 +214,14 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--de-border-faint);
     flex-shrink: 0;
 }
 
 .dynevt-set-list-title {
     font-size: 0.82em;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--de-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -169,10 +238,10 @@
     padding: 8px 12px;
     cursor: pointer;
     transition: background 0.1s;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--de-border-faint);
 }
-.dynevt-set-row:hover { background: rgba(255, 255, 255, 0.03); }
-.dynevt-set-row.selected { background: rgba(100, 140, 220, 0.12); }
+.dynevt-set-row:hover { background: var(--de-surface); }
+.dynevt-set-row.selected { background: var(--de-accent-wash); }
 .dynevt-set-row.inactive { opacity: 0.45; }
 
 .dynevt-set-toggle { flex-shrink: 0; }
@@ -187,7 +256,7 @@
 
 .dynevt-set-name {
     font-size: 0.88em;
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--de-text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -195,20 +264,20 @@
 
 .dynevt-set-meta {
     font-size: 0.72em;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--de-text-faint);
 }
 .dynevt-set-meta i { font-size: 0.8em; margin: 0 2px; }
 
 /* Secondary set indentation */
 .dynevt-set-row.dynevt-set-secondary {
     padding-left: 24px;
-    border-left: 2px solid rgba(100, 140, 220, 0.25);
+    border-left: 2px solid var(--de-accent-border);
     margin-left: 12px;
 }
 
 .dynevt-secondary-icon {
     font-size: 0.7em;
-    color: rgba(100, 140, 220, 0.5);
+    color: var(--de-accent-dim);
     margin-right: 3px;
 }
 
@@ -228,7 +297,7 @@
 
 .dynevt-right-header {
     padding: 10px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--de-border-faint);
     flex-shrink: 0;
 }
 
@@ -250,11 +319,11 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--de-border-faint);
     flex-shrink: 0;
     font-size: 0.82em;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--de-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.4px;
 }
@@ -276,15 +345,15 @@
     padding: 6px 14px;
     cursor: pointer;
     transition: background 0.1s;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--de-border-faint);
     font-size: 0.88em;
 }
-.dynevt-event-row:hover { background: rgba(255, 255, 255, 0.02); }
-.dynevt-event-row.selected { background: rgba(120, 200, 140, 0.08); }
+.dynevt-event-row:hover { background: var(--de-surface); }
+.dynevt-event-row.selected { background: var(--de-green-wash); }
 
 /* Drag handle */
 .dynevt-drag-handle {
-    color: rgba(255, 255, 255, 0.15);
+    color: var(--de-text-ghost);
     font-size: 0.78em;
     cursor: grab;
     flex-shrink: 0;
@@ -292,23 +361,23 @@
     transition: color 0.15s;
 }
 .dynevt-drag-handle:active { cursor: grabbing; }
-.dynevt-event-row:hover .dynevt-drag-handle { color: rgba(255, 255, 255, 0.35); }
+.dynevt-event-row:hover .dynevt-drag-handle { color: var(--de-text-faint); }
 
 /* Drag-in-progress states */
 .dynevt-event-row.dynevt-dragging { opacity: 0.35; }
-.dynevt-event-row.dynevt-drag-over-top { box-shadow: inset 0 2px 0 0 rgba(100, 140, 220, 0.7); }
-.dynevt-event-row.dynevt-drag-over-bottom { box-shadow: inset 0 -2px 0 0 rgba(100, 140, 220, 0.7); }
+.dynevt-event-row.dynevt-drag-over-top { box-shadow: inset 0 2px 0 0 var(--de-accent-strong); }
+.dynevt-event-row.dynevt-drag-over-bottom { box-shadow: inset 0 -2px 0 0 var(--de-accent-strong); }
 
 .dynevt-event-toggle { flex-shrink: 0; }
-.dynevt-event-icon { font-size: 0.82em; color: rgba(255, 255, 255, 0.35); width: 16px; text-align: center; }
-.dynevt-event-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255, 255, 255, 0.75); }
+.dynevt-event-icon { font-size: 0.82em; color: var(--de-text-faint); width: 16px; text-align: center; }
+.dynevt-event-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--de-text); }
 
 .dynevt-event-type {
     font-size: 0.68em;
     padding: 2px 6px;
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.4);
+    background: var(--de-surface-2);
+    color: var(--de-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.3px;
     white-space: nowrap;
@@ -316,7 +385,7 @@
 
 .dynevt-event-status {
     font-size: 0.68em;
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--de-text-dim);
     white-space: nowrap;
     max-width: 180px;
     overflow: hidden;
@@ -327,9 +396,9 @@
 
 .dynevt-editor {
     padding: 12px 14px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    border-left: 2px solid rgba(100, 140, 220, 0.35);
-    background: rgba(0, 0, 0, 0.15);
+    border-top: 1px solid var(--de-border);
+    border-left: 2px solid var(--de-accent-line);
+    background: var(--de-bg-inset);
     margin-left: 4px;
 }
 
@@ -349,7 +418,7 @@
 }
 .dynevt-field > label {
     font-size: 0.72em;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--de-text-faint);
     text-transform: uppercase;
     letter-spacing: 0.3px;
 }
@@ -357,12 +426,12 @@
 .dynevt-section-label {
     font-size: 0.74em;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--de-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.4px;
     padding: 8px 0 4px;
     margin-top: 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid var(--de-border-faint);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -373,9 +442,9 @@
 .dynevt-phase {
     padding: 8px;
     margin: 4px 0;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--de-border-soft);
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--de-bg-inset-soft);
 }
 
 .dynevt-phase-header {
@@ -390,13 +459,13 @@
 }
 
 .dynevt-phase-collapse {
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--de-text-faint);
     font-size: 0.78em;
     width: 18px;
     flex-shrink: 0;
 }
 .dynevt-phase-collapse:hover {
-    color: rgba(255, 255, 255, 0.65);
+    color: var(--de-text-muted);
 }
 
 .dynevt-phase-body {
@@ -407,10 +476,10 @@
 
 .dynevt-btn {
     padding: 4px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--de-border-hover);
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.65);
+    background: var(--de-surface);
+    color: var(--de-text-muted);
     cursor: pointer;
     font-size: 0.82em;
     transition: background 0.15s;
@@ -419,21 +488,21 @@
     align-items: center;
     gap: 4px;
 }
-.dynevt-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.dynevt-btn:hover { background: var(--de-surface-hover); }
 
 .dynevt-btn-accent {
-    background: rgba(100, 140, 220, 0.15);
-    border-color: rgba(100, 140, 220, 0.25);
-    color: rgba(140, 175, 240, 0.9);
+    background: var(--de-accent-bg);
+    border-color: var(--de-accent-border);
+    color: var(--de-accent-text);
 }
-.dynevt-btn-accent:hover { background: rgba(100, 140, 220, 0.25); }
+.dynevt-btn-accent:hover { background: var(--de-accent-bg-hover); }
 
 .dynevt-btn-sm { padding: 2px 6px; font-size: 0.78em; }
 
 .dynevt-btn-icon {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.25);
+    color: var(--de-text-dim);
     cursor: pointer;
     padding: 2px 5px;
     transition: color 0.15s;
@@ -441,9 +510,9 @@
 .dynevt-btn-icon:hover { color: rgba(255, 80, 80, 0.8); }
 
 .dynevt-input, .dynevt-select, .dynevt-textarea {
-    background: rgba(0, 0, 0, 0.25);
-    color: rgba(255, 255, 255, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--de-bg-input);
+    color: var(--de-text);
+    border: 1px solid var(--de-border);
     border-radius: 3px;
     padding: 5px 7px;
     font-size: 0.88em;
@@ -455,7 +524,7 @@
 .dynevt-input, .dynevt-select { height: 30px; }
 .dynevt-input:focus, .dynevt-select:focus, .dynevt-textarea:focus {
     outline: none;
-    border-color: rgba(100, 140, 220, 0.35);
+    border-color: var(--de-accent-border-soft);
 }
 
 .dynevt-input-sm { width: auto; min-width: 60px; }
@@ -467,7 +536,7 @@
 .dynevt-empty {
     text-align: center;
     padding: 16px;
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--de-text-dim);
     font-size: 0.84em;
     font-style: italic;
 }
@@ -500,8 +569,8 @@
 }
 
 .dynevt-confirm-box {
-    background: rgba(24, 24, 30, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--de-bg-confirm);
+    border: 1px solid var(--de-border-hover);
     border-radius: 6px;
     padding: 20px 24px;
     min-width: 300px;
@@ -514,7 +583,7 @@
 }
 
 .dynevt-confirm-msg {
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--de-text);
     font-size: 0.92em;
     line-height: 1.45;
     margin-bottom: 18px;
@@ -561,17 +630,17 @@
     transition: background 0.1s;
 }
 .dynevt-export-row:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--de-surface);
 }
 
 .dynevt-export-set-name {
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--de-text);
     font-size: 0.88em;
     flex: 1;
 }
 
 .dynevt-export-set-meta {
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--de-text-faint);
     font-size: 0.74em;
     white-space: nowrap;
 }
@@ -598,7 +667,7 @@
     align-items: center;
     gap: 4px;
     font-size: 0.78em;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--de-text-muted);
     cursor: pointer;
     white-space: nowrap;
     padding-bottom: 5px;
@@ -607,7 +676,7 @@
 .dynevt-phase-condition {
     margin-top: 6px;
     padding-top: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid var(--de-border-faint);
 }
 
 /* ─── Character Picker (autocomplete + pills) ─────── */
@@ -622,15 +691,15 @@
     flex-wrap: wrap;
     gap: 4px;
     align-items: center;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--de-bg-input);
+    border: 1px solid var(--de-border);
     border-radius: 3px;
     padding: 4px 6px;
     min-height: 32px;
     cursor: text;
 }
 .dynevt-char-pills:focus-within {
-    border-color: rgba(100, 140, 220, 0.35);
+    border-color: var(--de-accent-border-soft);
 }
 
 .dynevt-char-pill {
@@ -639,9 +708,9 @@
     gap: 2px;
     padding: 2px 8px;
     border-radius: 10px;
-    background: rgba(100, 140, 220, 0.2);
-    border: 1px solid rgba(100, 140, 220, 0.3);
-    color: rgba(180, 200, 240, 0.9);
+    background: var(--de-accent-wash-strong);
+    border: 1px solid var(--de-accent-border-soft);
+    color: var(--de-accent-text);
     font-size: 0.82em;
     white-space: nowrap;
     line-height: 1.4;
@@ -655,7 +724,7 @@
     height: 14px;
     font-size: 12px;
     line-height: 1;
-    color: rgba(255, 255, 255, 0.25);
+    color: var(--de-text-faint);
     cursor: pointer;
     border-radius: 50%;
     opacity: 0;
@@ -664,7 +733,7 @@
 }
 .dynevt-char-pill:hover .dynevt-char-pill-x {
     opacity: 1;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--de-text-muted);
 }
 .dynevt-char-pill-x:hover {
     color: rgba(240, 100, 100, 0.95);
@@ -676,14 +745,14 @@
     min-width: 120px;
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--de-text);
     font-size: 0.86em;
     font-family: inherit;
     padding: 2px 4px;
     outline: none;
 }
 .dynevt-char-search::placeholder {
-    color: rgba(255, 255, 255, 0.25);
+    color: var(--de-text-faint);
 }
 
 .dynevt-char-dropdown {
@@ -693,8 +762,8 @@
     left: 0;
     right: 0;
     z-index: 10;
-    background: rgba(22, 22, 28, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--de-bg-modal);
+    border: 1px solid var(--de-border-hover);
     border-top: none;
     border-radius: 0 0 3px 3px;
     max-height: 200px;
@@ -709,15 +778,15 @@
     padding: 6px 10px;
     cursor: pointer;
     font-size: 0.86em;
-    color: rgba(255, 255, 255, 0.75);
+    color: var(--de-text);
     transition: background 0.1s;
 }
 .dynevt-char-option:hover {
-    background: rgba(100, 140, 220, 0.15);
+    background: var(--de-accent-wash);
 }
 
 .dynevt-char-avatar {
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--de-text-dim);
     font-size: 0.88em;
     font-style: italic;
 }
@@ -725,7 +794,7 @@
 .dynevt-char-no-match {
     padding: 8px 10px;
     font-size: 0.82em;
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--de-text-dim);
     font-style: italic;
     text-align: center;
 }
@@ -785,7 +854,7 @@
     padding: 2px 0 6px;
 }
 .dynevt-hint code {
-    background: rgba(255,255,255,0.06);
+    background: var(--de-surface-2, rgba(255,255,255,0.06));
     padding: 1px 5px;
     border-radius: 3px;
     font-size: 0.95em;
