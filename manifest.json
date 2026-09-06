@@ -1,12 +1,12 @@
 {
     "display_name": "Dynamic Events",
-    "loading_order": 20,
+    "loading_order": 120,
     "requires": [],
     "optional": [],
     "js": "index.js",
     "css": "style.css",
     "author": "mokimoko",
-    "version": "0.1.0",
+    "version": "0.20.1",
     "homePage": "https://github.com/mokimoko/SillyTavern-DynamicEvents",
-    "description": "Schedule-and-probability-triggered event injection system. Define event sets with recurring, one-shot, and plot-chain events that fire based on message count, intervals, and probability — replacing complex lorebook event hacks."
+    "description": "Build scheduled story events, continuous state tracks, stateless layered prompt routers, and optional cross-extension actions with nested conditions and validated character state."
 }
