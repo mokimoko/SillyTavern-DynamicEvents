@@ -7,6 +7,7 @@ import {
     evaluateConditionDetailed,
     generateId,
     isSetActive,
+    resolveSetBindingContext,
 } from '../../eventEngine.js';
 import { createSubject, renderSubjectText, resolveSubject } from '../subjects/subjects.js';
 
@@ -110,10 +111,11 @@ export function evaluatePromptRouters(eventSets, chatState, bindingContext, eval
 
     for (const set of eventSets || []) {
         if (!isSetActive(set, bindingContext)) continue;
+        const setContext = resolveSetBindingContext(set, bindingContext);
         for (const router of (set.promptRouters || [])) {
             if (!router.enabled) continue;
             const context = {
-                ...bindingContext,
+                ...setContext,
                 ...evaluationContext,
                 subject: router.subject,
             };

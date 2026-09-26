@@ -4,6 +4,7 @@ import { debug, getSettings } from '../config/settings.js';
 import { cloneRuntimeState } from './branchState.js';
 import { getBindingContext } from './bindingContext.js';
 import { getChatState, saveChatState } from './chatState.js';
+import { openTimeSkipDialog } from '../ui/timeSkipDialog.js';
 
 const LOG_PREFIX = '[DynEvents]';
 let scriptsRunning = false;
@@ -13,11 +14,14 @@ export async function runScripts(timing, options = {}) {
     if (!settings.enabled || scriptsRunning) return [];
     const chatState = options.chatState || cloneRuntimeState(getChatState());
     const bindingContext = getBindingContext();
+    const messages = getContext().chat || [];
     let scripts;
     try {
         scripts = evaluateScripts(settings.eventSets, chatState, bindingContext, timing, {
             messageIndex: options.messageIndex,
             swipeId: options.swipeId,
+            messages,
+            keywordCache: new Map(),
         });
     } catch (error) {
         console.error(LOG_PREFIX, 'evaluateScripts failed:', error);
@@ -38,6 +42,7 @@ export async function runScripts(timing, options = {}) {
 }
 
 async function executeScript(script) {
+    if (script.builtInAction === 'time-skip') return openTimeSkipDialog();
     const body = (script.body || '').trim();
     if (!body) return;
     try {
@@ -55,7 +60,11 @@ async function executeScript(script) {
 
 export async function runManualScript(script, { showSuccessToast = true } = {}) {
     if (!script || scriptsRunning) return;
-    if (!evaluateCondition(script.condition, getChatState(), getBindingContext())) {
+    if (!evaluateCondition(script.condition, getChatState(), {
+        ...getBindingContext(),
+        messages: getContext().chat || [],
+        keywordCache: new Map(),
+    })) {
         toastr.info(`Script "${script.name}": condition not met.`, 'Dynamic Events');
         return;
     }
@@ -65,5 +74,5 @@ export async function runManualScript(script, { showSuccessToast = true } = {}) 
     } finally {
         scriptsRunning = false;
     }
-    if (showSuccessToast) toastr.info(`Ran script: ${script.name}`, 'Dynamic Events');
+    if (showSuccessToast && !script.builtInAction) toastr.info(`Ran script: ${script.name}`, 'Dynamic Events');
 }

@@ -48,6 +48,14 @@ function endpointOptions(fields, selected, emptyLabel) {
     return options.map(option => `<option value="${esc(option.relativePath)}" ${option.relativePath === selected ? 'selected' : ''}>${esc(option.label || option.relativePath)}</option>`).join('');
 }
 
+function valueFieldOptions(description, selected) {
+    const fields = (description?.fields || [])
+        .filter(field => field.path && !field.path.includes('$subject')
+            && (field.type === 'string' || field.type?.includes?.('string')))
+        .map(field => ({ relativePath: field.path, label: field.label || field.path }));
+    return endpointOptions(fields, selected, '(choose a string field)');
+}
+
 export function renderSubjectEditor(subject, {
     id,
     label = 'Narrative subject',
@@ -57,7 +65,9 @@ export function renderSubjectEditor(subject, {
 } = {}) {
     const binding = createSubject(subject);
     const listId = `dynevt-subjects-${id || 'editor'}`;
-    const showStateSource = allowStateSource || binding.mode === SubjectMode.STATE_SOURCE;
+    const showStateSource = allowStateSource
+        || binding.mode === SubjectMode.STATE_SOURCE
+        || binding.mode === SubjectMode.STATE_VALUE;
     const sources = listConditionSources(binding.providerId || 'superagents');
     if (binding.source && !sources.some(source => source.id === binding.source)) {
         sources.push({ id: binding.source, label: `${binding.source} (unavailable)` });
@@ -68,7 +78,9 @@ export function renderSubjectEditor(subject, {
     const collectionPath = binding.collectionPath || collections[0]?.path || '';
     const endpoints = endpointFields(description, collectionPath);
     const needsValue = binding.mode === SubjectMode.TRACKED || binding.mode === SubjectMode.MANUAL;
-    const needsSource = binding.mode === SubjectMode.STATE_SOURCE;
+    const needsCollectionSource = binding.mode === SubjectMode.STATE_SOURCE;
+    const needsStateValue = binding.mode === SubjectMode.STATE_VALUE;
+    const needsRuntimeSource = needsCollectionSource || needsStateValue;
     return `
         <div class="dynevt-track-subject-box" data-subject-editor>
             <div class="dynevt-subject-fields">
@@ -76,30 +88,36 @@ export function renderSubjectEditor(subject, {
                     <option value="${SubjectMode.ACTIVE_CARD}" ${binding.mode === SubjectMode.ACTIVE_CARD ? 'selected' : ''}>Active card / current group speaker</option>
                     <option value="${SubjectMode.TRACKED}" ${binding.mode === SubjectMode.TRACKED ? 'selected' : ''}>Choose tracked narrative character</option>
                     <option value="${SubjectMode.MANUAL}" ${binding.mode === SubjectMode.MANUAL ? 'selected' : ''}>Manual state key</option>
-                    ${showStateSource ? `<option value="${SubjectMode.STATE_SOURCE}" ${needsSource ? 'selected' : ''}>Choose an eligible state entry at runtime</option>` : ''}
+                    ${showStateSource ? `<option value="${SubjectMode.STATE_SOURCE}" ${needsCollectionSource ? 'selected' : ''}>Choose an eligible state entry at runtime</option>
+                    <option value="${SubjectMode.STATE_VALUE}" ${needsStateValue ? 'selected' : ''}>Use a state field value at runtime</option>` : ''}
                 </select></div>
                 <div class="dynevt-field dynevt-field-grow ${needsValue ? '' : 'hidden'}" data-subject-value-wrap>
                     <label>Subject key</label><input class="dynevt-input" list="${listId}" data-subject-field="value" value="${esc(binding.value)}" placeholder="Narrative character name exactly as tracked" />
                     <datalist id="${listId}">${suggestions.map(value => `<option value="${esc(value)}"></option>`).join('')}</datalist>
                 </div>
-                ${showStateSource ? `<div class="dynevt-field ${needsSource ? '' : 'hidden'}" data-subject-source-wrap>
+                ${showStateSource ? `<div class="dynevt-field ${needsRuntimeSource ? '' : 'hidden'}" data-subject-runtime-source-wrap>
                     <label>Runtime state source</label><select class="dynevt-select" data-subject-field="source">
                         ${sources.map(item => `<option value="${esc(item.id)}" ${item.id === source ? 'selected' : ''}>${esc(item.label || item.id)}</option>`).join('')}
                     </select>
                 </div>
-                <div class="dynevt-field ${needsSource ? '' : 'hidden'}" data-subject-source-wrap>
+                <div class="dynevt-field ${needsCollectionSource ? '' : 'hidden'}" data-subject-collection-source-wrap>
                     <label>Eligible collection</label><select class="dynevt-select" data-subject-field="collectionPath">
                         ${collections.map(collection => `<option value="${esc(collection.path)}" ${collection.path === collectionPath ? 'selected' : ''}>${esc(collection.label || collection.path)}</option>`).join('')}
                     </select>
                 </div>
-                <div class="dynevt-field ${needsSource ? '' : 'hidden'}" data-subject-source-wrap>
+                <div class="dynevt-field ${needsCollectionSource ? '' : 'hidden'}" data-subject-collection-source-wrap>
                     <label>Narrative subject field</label><select class="dynevt-select" data-subject-field="subjectPath">
                         ${endpointOptions(endpoints, binding.subjectPath, '(collection key)')}
                     </select>
                 </div>
-                <div class="dynevt-field ${needsSource ? '' : 'hidden'}" data-subject-source-wrap>
+                <div class="dynevt-field ${needsCollectionSource ? '' : 'hidden'}" data-subject-collection-source-wrap>
                     <label>Counterpart field</label><select class="dynevt-select" data-subject-field="counterpartPath">
                         ${endpointOptions(endpoints, binding.counterpartPath, '(none)')}
+                    </select>
+                </div>
+                <div class="dynevt-field ${needsStateValue ? '' : 'hidden'}" data-subject-state-value-wrap>
+                    <label>Subject value field</label><select class="dynevt-select" data-subject-field="subjectPath">
+                        ${valueFieldOptions(description, binding.subjectPath)}
                     </select>
                 </div>` : ''}
             </div>
@@ -131,15 +149,21 @@ export function wireSubjectEditor(container, owner, callbacks = {}) {
         collectionSelect.value = owner.subject.collectionPath;
     };
     const syncStateSourceDefaults = () => {
-        if (owner.subject.mode !== SubjectMode.STATE_SOURCE) return;
+        if (![SubjectMode.STATE_SOURCE, SubjectMode.STATE_VALUE].includes(owner.subject.mode)) return;
         if (!owner.subject.source) owner.subject.source = sourceSelect?.value || '';
-        if (!owner.subject.collectionPath) owner.subject.collectionPath = collectionSelect?.value || '';
+        if (owner.subject.mode === SubjectMode.STATE_SOURCE && !owner.subject.collectionPath) {
+            owner.subject.collectionPath = collectionSelect?.value || '';
+        }
     };
     const updateVisibility = () => {
         const needsValue = owner.subject.mode === SubjectMode.TRACKED || owner.subject.mode === SubjectMode.MANUAL;
         editor?.querySelector('[data-subject-value-wrap]')?.classList.toggle('hidden', !needsValue);
-        editor?.querySelectorAll('[data-subject-source-wrap]')
+        editor?.querySelectorAll('[data-subject-runtime-source-wrap]')
+            .forEach(element => element.classList.toggle('hidden', ![SubjectMode.STATE_SOURCE, SubjectMode.STATE_VALUE].includes(owner.subject.mode)));
+        editor?.querySelectorAll('[data-subject-collection-source-wrap]')
             .forEach(element => element.classList.toggle('hidden', owner.subject.mode !== SubjectMode.STATE_SOURCE));
+        editor?.querySelectorAll('[data-subject-state-value-wrap]')
+            .forEach(element => element.classList.toggle('hidden', owner.subject.mode !== SubjectMode.STATE_VALUE));
     };
     container.querySelectorAll(':scope [data-subject-editor] [data-subject-field]').forEach(input => {
         input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => {

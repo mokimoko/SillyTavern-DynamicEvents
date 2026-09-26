@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "mokimoko",
-    "version": "0.20.1",
+    "version": "0.30.2",
     "homePage": "https://github.com/mokimoko/SillyTavern-DynamicEvents",
     "description": "Build scheduled story events, continuous state tracks, stateless layered prompt routers, and optional cross-extension actions with nested conditions and validated character state."
 }

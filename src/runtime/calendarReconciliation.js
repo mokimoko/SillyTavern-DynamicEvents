@@ -40,8 +40,12 @@ export function appendCalendarReconciliationCues(fired, texts, chatState, calend
         const cue = buildCalendarReconciliationCue(event, grant?.token);
         if (!cue) continue;
         payload.text = `${payload.text}\n${cue}`;
+        if (payload.baseText !== undefined) payload.baseText = `${payload.baseText}\n${cue}`;
         const pending = chatState?.pendingEventInjections?.[event.id];
-        if (pending) pending.text = payload.text;
+        if (pending) {
+            pending.text = payload.text;
+            if (pending.baseText !== undefined) pending.baseText = payload.baseText;
+        }
         changed++;
     }
     return changed;

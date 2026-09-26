@@ -3,22 +3,42 @@ import { getContext } from '../../../../../extensions.js';
 import { tags as stTags, tag_map as stTagMap } from '../../../../../tags.js';
 import { BindMode } from '../../eventEngine.js';
 
-/** Resolve the active card/group and its native SillyTavern tags. */
+/** Resolve the active card or enabled group members and their native tags. */
 export function getBindingContext() {
     const ctx = getContext();
-    const groupId = ctx.groupId;
+    const groupId = ctx.groupId ? String(ctx.groupId) : '';
     let avatar = '';
     let charName = '';
     if (this_chid !== undefined && characters[this_chid]) {
         avatar = characters[this_chid].avatar || '';
         charName = characters[this_chid].name || '';
     }
-    const entityId = groupId ? String(groupId) : avatar;
-    let tagIds = [];
-    try {
-        if (entityId && Array.isArray(stTagMap[entityId])) tagIds = [...stTagMap[entityId]];
-    } catch { /* tag_map unavailable */ }
-    return { charName, avatar, groupId: groupId || '', tagIds };
+
+    const group = groupId && Array.isArray(ctx.groups)
+        ? ctx.groups.find(item => String(item?.id) === groupId)
+        : null;
+    const disabled = new Set(group?.disabled_members || []);
+    const cards = Array.isArray(ctx.characters) ? ctx.characters : characters;
+    const groupMembers = (group?.members || [])
+        .filter(memberAvatar => !disabled.has(memberAvatar))
+        .map(memberAvatar => {
+            const card = cards.find(item => item?.avatar === memberAvatar);
+            return { avatar: memberAvatar, charName: card?.name || '' };
+        });
+
+    const tagIds = new Set();
+    const addTags = entityId => {
+        if (entityId && Array.isArray(stTagMap?.[entityId])) {
+            for (const id of stTagMap[entityId]) tagIds.add(id);
+        }
+    };
+    if (groupId) {
+        addTags(groupId);
+        for (const member of groupMembers) addTags(member.avatar);
+    } else {
+        addTags(avatar);
+    }
+    return { charName, avatar, groupId, groupMembers, tagIds: [...tagIds] };
 }
 
 /** Sorted unique character cards for binding pickers and migrations. */

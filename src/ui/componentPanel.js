@@ -17,6 +17,12 @@ import { renderCharPicker, renderTagPicker, wireCharPicker, wireTagPicker } from
 import { getComponentToggleState, getSetComponents, setAllComponentsEnabled } from './componentToggle.js';
 import { renderEventEditor } from './eventEditor.js';
 import {
+    closeEventRequirements,
+    refreshEventRequirementBadge,
+    renderEventRequirementBadge,
+    wireEventRequirementBadge,
+} from './eventRequirements.js';
+import {
     clearComponentSelection,
     getSelectedComponentIds,
     openEventEditor,
@@ -27,6 +33,7 @@ import {
 import { renderScriptEditor, renderScriptRow, wireScriptRows } from './scriptEditor.js';
 import { renderStateTrackEditor, renderStateTrackRow, wireStateTrackEditor } from './stateTrackEditor.js';
 import { renderPromptRouterEditor, renderPromptRouterRow, wirePromptRouterEditor } from './promptRouterEditor.js';
+import { openSharedInstructionManager } from './sharedInstructionEditor.js';
 
 const escapeHtml = value => String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -59,6 +66,8 @@ export function createComponentPanel({
                 {
                     messageIndex,
                     swipeId: runtime?.swipeId ?? activeSwipeId(chat[messageIndex]),
+                    messages: chat,
+                    keywordCache: new Map(),
                 },
             );
         } catch (error) {
@@ -76,8 +85,10 @@ export function createComponentPanel({
                 runtime?.chatState ?? getChatState(),
                 runtime?.bindingContext ?? getBindingContext(),
                 {
-                messageIndex,
+                    messageIndex,
                     swipeId: runtime?.swipeId ?? activeSwipeId(chat[messageIndex]),
+                    messages: chat,
+                    keywordCache: new Map(),
                 },
             );
         } catch (error) {
@@ -109,6 +120,7 @@ export function createComponentPanel({
                 </label>
                 <i class="fa-solid ${categoryIcon} dynevt-event-icon" title="${escapeHtml(event.category)}"></i>
                 <span class="dynevt-event-name">${escapeHtml(event.name)}</span>
+                ${renderEventRequirementBadge(event)}
                 <span class="dynevt-event-type">${escapeHtml(event.schedule?.type)}</span>
                 <span class="dynevt-event-status">${escapeHtml(status)}</span>
                 <button class="dynevt-btn-icon" data-action="reset-event" title="Reset state" onclick="event.stopPropagation()"><i class="fa-solid fa-rotate-left"></i></button>
@@ -163,6 +175,7 @@ export function createComponentPanel({
         let dragSourceId = null;
         panel.querySelectorAll('.dynevt-event-row:not(.dynevt-script-row):not(.dynevt-track-row):not(.dynevt-router-row)').forEach(row => {
             const id = row.dataset.id;
+            wireEventRequirementBadge(row.querySelector('[data-requirements]'), set.events.find(item => item.id === id));
             row.addEventListener('click', event => {
                 if (event.target.closest('input, button, [data-action]')) return;
                 toggleEventEditor(state, id);
@@ -376,6 +389,7 @@ export function createComponentPanel({
     function renderRightPanel({ scrollSelection = true, restoreEventsScrollTop = null } = {}) {
         const panel = document.getElementById('dynevt-panel-right');
         if (!panel) return;
+        closeEventRequirements();
         const settings = getSettings();
         const set = settings.eventSets.find(item => item.id === state.selectedSetId);
         if (!set) {
@@ -427,7 +441,6 @@ export function createComponentPanel({
         const showCharPicker = set.bindMode === BindMode.CHARACTER;
         const showTagPicker = set.bindMode === BindMode.TAG;
         const showRow2 = showParentPicker || showCharPicker || showTagPicker;
-        const hasComponents = set.events.length || (set.scripts || []).length || (set.stateTracks || []).length || (set.promptRouters || []).length;
         const componentToggleState = getComponentToggleState(set);
         const bulkToggleLabel = componentToggleState.allEnabled ? 'Disable all' : 'Enable all';
         const componentSelectionLabel = allComponentsSelected ? 'Deselect all components' : 'Select all components';
@@ -459,9 +472,10 @@ export function createComponentPanel({
             </div>
             <div class="dynevt-events-header">
                 <div class="dynevt-events-heading">
-                    <span>Events, State Tracks, Prompt Routers &amp; Scripts</span>
+                    <span>Components</span>
                 </div>
                 <div class="dynevt-header-btns">
+                    <button class="dynevt-toolbar-btn" id="dynevt-manage-shared-instructions" title="Manage Shared Instructions" aria-label="Manage Shared Instructions"><span class="dynevt-add-glyph" aria-hidden="true"><i class="fa-solid fa-layer-group"></i><span class="dynevt-toolbar-count">${(set.sharedInstructions || []).length}</span></span></button>
                     <button class="dynevt-toolbar-btn dynevt-select-all-components ${selectedComponentCount ? 'active' : ''} ${someComponentsSelected ? 'partial' : ''}" id="dynevt-select-all-components" title="${componentSelectionLabel}" aria-label="${componentSelectionLabel}" aria-pressed="${allComponentsSelected ? 'true' : someComponentsSelected ? 'mixed' : 'false'}" ${componentIds.length ? '' : 'disabled'}>
                         <i class="fa-solid ${allComponentsSelected ? 'fa-square-minus' : 'fa-list-check'}" aria-hidden="true"></i>
                     </button>
@@ -469,30 +483,36 @@ export function createComponentPanel({
                         <i class="fa-solid ${componentToggleState.allEnabled ? 'fa-toggle-on' : 'fa-toggle-off'}" aria-hidden="true"></i>
                     </button>
                     ${selectedComponentCount > 0 ? `<button class="dynevt-toolbar-btn dynevt-toolbar-danger" id="dynevt-delete-selected-components" title="Delete ${selectedComponentCount} selected component${selectedComponentCount === 1 ? '' : 's'}" aria-label="Delete ${selectedComponentCount} selected component${selectedComponentCount === 1 ? '' : 's'}"><i class="fa-solid fa-trash" aria-hidden="true"></i><span class="dynevt-toolbar-count">${selectedComponentCount}</span></button>` : ''}
-                    <span class="dynevt-toolbar-divider" aria-hidden="true"></span>
-                    <button class="dynevt-toolbar-btn dynevt-btn-router" id="dynevt-add-router" title="Add Prompt Router" aria-label="Add Prompt Router"><span class="dynevt-add-glyph" aria-hidden="true"><i class="fa-solid fa-code-branch"></i><i class="fa-solid fa-plus dynevt-add-mark"></i></span></button>
-                    <button class="dynevt-toolbar-btn dynevt-btn-track" id="dynevt-add-track" title="Add State Track" aria-label="Add State Track"><span class="dynevt-add-glyph" aria-hidden="true"><i class="fa-solid fa-layer-group"></i><i class="fa-solid fa-plus dynevt-add-mark"></i></span></button>
-                    <button class="dynevt-toolbar-btn dynevt-btn-script" id="dynevt-add-script" title="Add Script" aria-label="Add Script"><span class="dynevt-add-glyph" aria-hidden="true"><i class="fa-solid fa-terminal"></i><i class="fa-solid fa-plus dynevt-add-mark"></i></span></button>
-                    <button class="dynevt-toolbar-btn dynevt-btn-accent" id="dynevt-add-event" title="Add Event" aria-label="Add Event"><span class="dynevt-add-glyph" aria-hidden="true"><i class="fa-solid fa-bolt"></i><i class="fa-solid fa-plus dynevt-add-mark"></i></span></button>
                 </div>
             </div>
             <div class="dynevt-events-area">
                 <div class="dynevt-event-list" id="dynevt-item-list">
-                    ${!hasComponents ? '<div class="dynevt-empty">No events, state tracks, prompt routers, or scripts in this set.</div>' :
-                        set.events.map(event => renderEventRow(event, renderChatState) + (event.id === state.selectedEventId ? '<div id="dynevt-event-editor"></div>' : '')).join('') +
-                        (set.stateTracks || []).map(track => renderStateTrackRow(track, trackInspections.get(track.id), {
-                            bulkSelected: selectedComponentIds.has(track.id),
-                            editing: track.id === state.selectedTrackId,
-                        }) + (track.id === state.selectedTrackId ? '<div id="dynevt-track-editor"></div>' : '')).join('') +
-                        (set.promptRouters || []).map(router => renderPromptRouterRow(router, routerInspections.get(router.id), {
+                    <section class="dynevt-component-section" aria-label="Events">
+                        <div class="dynevt-component-section-heading"><span><i class="fa-solid fa-bolt" aria-hidden="true"></i> Events <small>${set.events.length}</small></span><button class="dynevt-toolbar-btn dynevt-btn-accent" id="dynevt-add-event" title="Add Event" aria-label="Add Event"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add</button></div>
+                        ${set.events.length ? set.events.map(event => renderEventRow(event, renderChatState) + (event.id === state.selectedEventId ? '<div id="dynevt-event-editor"></div>' : '')).join('') : '<div class="dynevt-component-empty">No events in this set.</div>'}
+                    </section>
+                    <section class="dynevt-component-section" aria-label="Prompt Routers">
+                        <div class="dynevt-component-section-heading"><span><i class="fa-solid fa-code-branch" aria-hidden="true"></i> Prompt Routers <small>${(set.promptRouters || []).length}</small></span><button class="dynevt-toolbar-btn dynevt-btn-router" id="dynevt-add-router" title="Add Prompt Router" aria-label="Add Prompt Router"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add</button></div>
+                        ${(set.promptRouters || []).length ? (set.promptRouters || []).map(router => renderPromptRouterRow(router, routerInspections.get(router.id), {
                             bulkSelected: selectedComponentIds.has(router.id),
                             editing: router.id === state.selectedRouterId,
-                        }) + (router.id === state.selectedRouterId ? '<div id="dynevt-router-editor"></div>' : '')).join('') +
-                        (set.scripts || []).map(script => renderScriptRow(script, {
+                        }) + (router.id === state.selectedRouterId ? '<div id="dynevt-router-editor"></div>' : '')).join('') : '<div class="dynevt-component-empty">No prompt routers in this set.</div>'}
+                    </section>
+                    <section class="dynevt-component-section" aria-label="State Tracks">
+                        <div class="dynevt-component-section-heading"><span><i class="fa-solid fa-layer-group" aria-hidden="true"></i> State Tracks <small>${(set.stateTracks || []).length}</small></span><button class="dynevt-toolbar-btn dynevt-btn-track" id="dynevt-add-track" title="Add State Track" aria-label="Add State Track"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add</button></div>
+                        ${(set.stateTracks || []).length ? (set.stateTracks || []).map(track => renderStateTrackRow(track, trackInspections.get(track.id), {
+                            bulkSelected: selectedComponentIds.has(track.id),
+                            editing: track.id === state.selectedTrackId,
+                        }) + (track.id === state.selectedTrackId ? '<div id="dynevt-track-editor"></div>' : '')).join('') : '<div class="dynevt-component-empty">No state tracks in this set.</div>'}
+                    </section>
+                    <section class="dynevt-component-section" aria-label="Scripts">
+                        <div class="dynevt-component-section-heading"><span><i class="fa-solid fa-terminal" aria-hidden="true"></i> Scripts <small>${(set.scripts || []).length}</small></span><button class="dynevt-toolbar-btn dynevt-btn-script" id="dynevt-add-script" title="Add Script" aria-label="Add Script"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add</button></div>
+                        ${(set.scripts || []).length ? (set.scripts || []).map(script => renderScriptRow(script, {
                             bulkSelected: selectedComponentIds.has(script.id),
                             editing: script.id === state.selectedScriptId,
                             chatState: renderChatState,
-                        }) + (script.id === state.selectedScriptId ? '<div id="dynevt-script-editor"></div>' : '')).join('')}
+                        }) + (script.id === state.selectedScriptId ? '<div id="dynevt-script-editor"></div>' : '')).join('') : '<div class="dynevt-component-empty">No scripts in this set.</div>'}
+                    </section>
                 </div>
             </div>
         `;
@@ -540,6 +560,13 @@ export function createComponentPanel({
         wireTagPicker(panel, set, bindingsChanged);
 
         const bulkToggle = panel.querySelector('#dynevt-toggle-all-components');
+        panel.querySelector('#dynevt-manage-shared-instructions')?.addEventListener('click', () => {
+            openSharedInstructionManager(set, {
+                changed: () => saveSettings(),
+                closed: () => renderRightPanel({ scrollSelection: false }),
+                confirm,
+            });
+        });
         if (bulkToggle) {
             bulkToggle.addEventListener('click', function () {
                 if (!setAllComponentsEnabled(set, !componentToggleState.allEnabled)) return;
@@ -615,6 +642,10 @@ export function createComponentPanel({
         if (state.selectedEventId) {
             renderEventEditor(set);
             const editor = document.getElementById('dynevt-event-editor');
+            const event = set.events.find(item => item.id === state.selectedEventId);
+            editor?.addEventListener('change', () => refreshEventRequirementBadge(
+                panel.querySelector(`.dynevt-event-row[data-id="${event.id}"] [data-requirements]`), event,
+            ));
             if (scrollSelection && editor) editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
         if (state.selectedScriptId) {

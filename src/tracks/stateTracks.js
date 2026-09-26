@@ -8,6 +8,7 @@ import {
     evaluateConditionDetailed,
     generateId,
     isSetActive,
+    resolveSetBindingContext,
 } from '../../eventEngine.js';
 import {
     SubjectMode,
@@ -134,11 +135,12 @@ export function evaluateStateTracks(eventSets, chatState, bindingContext, evalua
 
     for (const set of eventSets) {
         if (!isSetActive(set, bindingContext)) continue;
+        const setContext = resolveSetBindingContext(set, bindingContext);
         for (const track of (set.stateTracks || [])) {
             if (!track.enabled) continue;
             const runtime = getTrackRuntime(chatState, track);
             const context = {
-                ...bindingContext,
+                ...setContext,
                 ...evaluationContext,
                 subject: track.subject,
             };

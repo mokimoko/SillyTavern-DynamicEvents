@@ -12,10 +12,17 @@ import {
     instantiatePreset,
     instantiatePresetEvents,
     instantiatePresetRouters,
+    instantiatePresetScripts,
+    instantiatePresetSharedInstructions,
     instantiatePresetTracks,
     resolvePresetEventKeys,
 } from '../presets/catalog.js';
 import { setBindLabel } from '../runtime/bindingContext.js';
+import {
+    closeEventRequirements,
+    renderEventRequirementBadge,
+    wireEventRequirementBadge,
+} from './eventRequirements.js';
 
 const services = {
     getGroupedSets: sets => sets,
@@ -36,6 +43,7 @@ const esc = value => String(value ?? '')
     .replaceAll('"', '&quot;');
 
 const AGENT_NAMES = Object.freeze({
+    sa_state_card: 'Scene State',
     sa_world_state: 'World State',
     sa_parallel: 'Parallel Off-Screen',
     sa_relationship_ledger: 'Relationship Ledger',
@@ -176,6 +184,13 @@ function renderPresetDependencies(preset, components, selectedKeys) {
 }
 
 export function showPresetPicker() {
+    const categories = [
+        { key: 'events', label: 'Events', singular: 'Event', setField: 'events' },
+        { key: 'routers', label: 'Prompt Routers', singular: 'Prompt Router', setField: 'promptRouters' },
+        { key: 'tracks', label: 'State Tracks', singular: 'State Track', setField: 'stateTracks' },
+        { key: 'scripts', label: 'Scripts', singular: 'Script', setField: 'scripts' },
+    ];
+    let activeCategory = 'events';
     document.getElementById('dynevt-preset-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.id = 'dynevt-preset-overlay';
@@ -185,6 +200,7 @@ export function showPresetPicker() {
     requestAnimationFrame(() => overlay.classList.add('dynevt-visible'));
 
     const close = () => {
+        closeEventRequirements();
         overlay.classList.remove('dynevt-visible');
         setTimeout(() => overlay.remove(), 200);
     };
@@ -193,54 +209,71 @@ export function showPresetPicker() {
         ...(preset.events || []).map(definition => ({ ...definition, componentType: 'event' })),
         ...(preset.tracks || []).map(definition => ({ ...definition, componentType: 'state track' })),
         ...(preset.routers || []).map(definition => ({ ...definition, componentType: 'prompt router' })),
+        ...(preset.scripts || []).map(definition => ({ ...definition, componentType: 'script' })),
     ];
 
     const renderCatalog = () => {
+        closeEventRequirements();
         const content = overlay.querySelector('#dynevt-preset-content');
+        const category = categories.find(item => item.key === activeCategory);
+        const visiblePresets = BUILT_IN_PRESETS.filter(preset => (preset[activeCategory] || []).length);
         content.innerHTML = `
             <div class="dynevt-preset-heading">
                 <div>
-                    <div class="dynevt-confirm-msg">Event Presets</div>
-                    <div class="dynevt-preset-intro">Choose a preset, then select exactly which components to add and where to put them. Added components start disabled.</div>
+                    <div class="dynevt-confirm-msg">Presets</div>
+                    <div class="dynevt-preset-intro">Choose a preset, then select its components and destination. Added components start disabled.</div>
                 </div>
                 <button class="dynevt-btn-icon" id="dynevt-preset-close" title="Close"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="dynevt-preset-grid">
-                ${BUILT_IN_PRESETS.map(preset => {
-                    const components = presetComponents(preset);
+            <div class="dynevt-preset-tabs" role="tablist" aria-label="Preset types">
+                ${categories.map(item => `<button class="dynevt-preset-tab ${item.key === activeCategory ? 'active' : ''}" type="button" role="tab" id="dynevt-preset-tab-${item.key}" aria-controls="dynevt-preset-grid" aria-selected="${item.key === activeCategory}" data-preset-category="${item.key}">${item.label}<span>${BUILT_IN_PRESETS.filter(preset => (preset[item.key] || []).length).length}</span></button>`).join('')}
+            </div>
+            <div class="dynevt-preset-grid" id="dynevt-preset-grid" role="tabpanel" aria-labelledby="dynevt-preset-tab-${activeCategory}">
+                ${visiblePresets.length ? visiblePresets.map(preset => {
+                    const categoryCount = (preset[activeCategory] || []).length;
+                    const otherTypes = categories.filter(item => item.key !== activeCategory && (preset[item.key] || []).length).map(item => item.label);
                     const installedCount = getSettings().eventSets.reduce((count, set) => count
-                        + (set.events || []).filter(event => event.sourcePresetId === preset.id).length
-                        + (set.stateTracks || []).filter(track => track.sourcePresetId === preset.id).length
-                        + (set.promptRouters || []).filter(router => router.sourcePresetId === preset.id).length, 0);
+                        + (set[category.setField] || []).filter(component => component.sourcePresetId === preset.id).length, 0);
                     return `<article class="dynevt-preset-card" data-preset-id="${esc(preset.id)}">
                         <div class="dynevt-preset-card-top">
                             <strong>${esc(preset.name)}</strong>
-                            <span>${components.length} component${components.length === 1 ? '' : 's'}</span>
+                            <span>${categoryCount} ${category.singular}${categoryCount === 1 ? '' : 's'}</span>
                         </div>
                         <p>${esc(preset.description)}</p>
+                        ${otherTypes.length ? `<div class="dynevt-preset-other-types">Also includes ${esc(otherTypes.join(', '))}</div>` : ''}
                         <div class="dynevt-preset-tags">${preset.tags.map(tag => `<span>${esc(tag)}</span>`).join('')}</div>
-                        ${installedCount ? `<div class="dynevt-preset-installed">${installedCount} preset component${installedCount === 1 ? '' : 's'} already added</div>` : ''}
+                        ${installedCount ? `<div class="dynevt-preset-installed">${installedCount} ${category.singular}${installedCount === 1 ? '' : 's'} already added</div>` : ''}
                         <button class="dynevt-btn dynevt-btn-accent" data-action="configure-preset">
                             <i class="fa-solid fa-sliders"></i> Choose components and destination
                         </button>
                     </article>`;
-                }).join('')}
+                }).join('') : `<div class="dynevt-preset-empty">No ${category.singular.toLowerCase()} presets yet. You can add ${category.label.toLowerCase()} directly in an event set.</div>`}
             </div>
         `;
         content.querySelector('#dynevt-preset-close').addEventListener('click', close);
+        content.querySelectorAll('[data-preset-category]').forEach(button => {
+            button.addEventListener('click', () => {
+                activeCategory = button.dataset.presetCategory;
+                renderCatalog();
+                content.querySelector(`#dynevt-preset-tab-${activeCategory}`)?.focus();
+            });
+        });
         content.querySelectorAll('[data-action="configure-preset"]').forEach(button => {
             button.addEventListener('click', () => {
                 const presetId = button.closest('[data-preset-id]')?.dataset.presetId;
                 const preset = getPreset(presetId);
-                if (preset) renderInstaller(preset);
+                if (preset) renderInstaller(preset, activeCategory);
             });
         });
     };
 
-    const renderInstaller = (preset) => {
+    const renderInstaller = (preset, initialCategory) => {
+        closeEventRequirements();
         const content = overlay.querySelector('#dynevt-preset-content');
         const settings = getSettings();
         const components = presetComponents(preset);
+        const initiallySelected = new Set(resolvePresetEventKeys(preset,
+            (preset[initialCategory] || []).map(component => component.key)));
         const hasTracks = (preset.tracks || []).length > 0;
         const hasSubjectBinding = hasTracks || Boolean(preset.subjectBinding);
         const stateSources = listConditionSources('superagents');
@@ -267,13 +300,21 @@ export function showPresetPicker() {
             const compatibleSources = sourcesForBinding(binding);
             return [binding.key, preferredSourceFor(binding, compatibleSources)];
         }));
+        // Preview the same resolved subject and state-source bindings that Add will install.
+        const installOptions = (hasTracks || stateBindings.length || hasSubjectBinding) ? {
+            stateSources: defaultStateSources,
+            stateSource: Object.values(defaultStateSources)[0] || 'sa_relationship_ledger',
+            ...(hasSubjectBinding ? { subject: preset.subjectBinding?.default } : {}),
+        } : {};
+        const previewEvents = instantiatePresetEvents(preset, null, installOptions);
+        const previewByKey = new Map((preset.events || []).map((event, index) => [event.key, previewEvents[index]]));
         const orderedSets = services.getGroupedSets(settings.eventSets);
         const selectedSetId = services.getSelectedSetId();
         const contextualSetId = orderedSets.some(set => set.id === selectedSetId) ? selectedSetId : '__new__';
         content.innerHTML = `
             <div class="dynevt-preset-heading">
                 <div>
-                    <button class="dynevt-btn dynevt-btn-sm" id="dynevt-preset-back"><i class="fa-solid fa-arrow-left"></i> All presets</button>
+                    <button class="dynevt-btn dynevt-btn-sm" id="dynevt-preset-back"><i class="fa-solid fa-arrow-left"></i> Presets</button>
                     <div class="dynevt-confirm-msg dynevt-preset-detail-title">${esc(preset.name)}</div>
                     <div class="dynevt-preset-intro">${esc(preset.description)}</div>
                 </div>
@@ -286,19 +327,25 @@ export function showPresetPicker() {
                         <button class="dynevt-toolbar-btn dynevt-preset-select-all" id="dynevt-preset-select-all" title="Deselect all components" aria-label="Deselect all components"><i class="fa-solid fa-square-minus" aria-hidden="true"></i></button>
                     </div>
                     <div class="dynevt-preset-event-list">
-                        ${components.map(definition => {
+                        ${categories.filter(category => (preset[category.key] || []).length).map(category => `<div class="dynevt-preset-component-group">
+                            <div class="dynevt-preset-component-heading">${category.label}<span>${(preset[category.key] || []).length}</span></div>
+                            ${components.filter(definition => definition.componentType === category.singular.toLowerCase()).map(definition => {
                             const requirements = (definition.requires || [])
                                 .map(key => components.find(component => component.key === key)?.name || key);
-                            return `<label class="dynevt-preset-event-row">
-                                <input type="checkbox" data-preset-event="${esc(definition.key)}" checked />
-                                <span>
-                                    <strong>${esc(definition.name)}</strong>
-                                    <em>${esc(definition.componentType)}</em>
-                                    <small>${esc(definition.description || '')}</small>
-                                    ${requirements.length ? `<em>Also requires: ${esc(requirements.join(', '))}</em>` : ''}
-                                </span>
-                            </label>`;
-                        }).join('')}
+                            const preview = definition.componentType === 'event' ? previewByKey.get(definition.key) : null;
+                            return `<div class="dynevt-preset-event-row" data-preset-key="${esc(definition.key)}">
+                                <label class="dynevt-preset-event-choice">
+                                    <input type="checkbox" data-preset-event="${esc(definition.key)}" ${initiallySelected.has(definition.key) ? 'checked' : ''} />
+                                    <span class="dynevt-preset-event-details">
+                                        <strong>${esc(definition.name)}</strong>
+                                        <small>${esc(definition.description || '')}</small>
+                                        ${requirements.length ? `<em>Also requires: ${esc(requirements.join(', '))}</em>` : ''}
+                                    </span>
+                                </label>
+                                ${preview ? renderEventRequirementBadge(preview) : ''}
+                            </div>`;
+                            }).join('')}
+                        </div>`).join('')}
                     </div>
                 </section>
                 <section>
@@ -316,8 +363,8 @@ export function showPresetPicker() {
                         <small>The new set and all added components will start disabled.</small>
                     </label>
                     ${(hasTracks || (preset.routers || []).length) ? `<div class="dynevt-preset-existing-note"><strong>State Tracks and Prompt Routers are added disabled.</strong> Compatible state sources are selected automatically when available. Review their conditions and output placement before enabling.</div>` : ''}
-                    <div class="dynevt-preset-dependencies">
-                        <div class="dynevt-preset-dependencies-title">Required agents</div>
+                    ${components.some(component => component.componentType !== 'script') ? `<div class="dynevt-preset-dependencies">
+                        <div class="dynevt-preset-dependencies-title">SuperAgents sources</div>
                         <div id="dynevt-preset-dependency-list"></div>
                     </div>
                     <div class="dynevt-preset-location-guide">
@@ -325,7 +372,7 @@ export function showPresetPicker() {
                         <span><b>Event / State Track / Prompt Router subject</b> chooses the character or runtime character pool.</span>
                         <span><b>Condition</b> chooses the validated state source used by each rule.</span>
                         <span><b>Actions</b> contains Phone or Feed behavior and recipient / author settings; connection profiles stay in SuperAgents.</span>
-                    </div>
+                    </div>` : `<div class="dynevt-preset-existing-note">Manual scripts appear by the send box once their script and destination set are enabled. Time Skip can use World State if it is active; no SuperAgents setup is required.</div>`}
                     <div class="dynevt-preset-existing-note" id="dynevt-preset-existing-note">Added components will start disabled. The destination set’s current enabled/binding settings will not change.</div>
                 </section>
             </div>
@@ -336,6 +383,9 @@ export function showPresetPicker() {
         `;
 
         const destination = content.querySelector('#dynevt-preset-destination');
+        content.querySelectorAll('.dynevt-preset-event-row[data-preset-key]').forEach(row => {
+            wireEventRequirementBadge(row.querySelector('[data-requirements]'), previewByKey.get(row.dataset.presetKey));
+        });
         const newName = content.querySelector('#dynevt-preset-new-name');
         const existingNote = content.querySelector('#dynevt-preset-existing-note');
         const checkboxes = [...content.querySelectorAll('[data-preset-event]')];
@@ -356,11 +406,8 @@ export function showPresetPicker() {
             selectAllButton.classList.toggle('partial', count > 0 && !allSelected);
             selectAllButton.innerHTML = `<i class="fa-solid ${allSelected ? 'fa-square-minus' : 'fa-list-check'}" aria-hidden="true"></i>`;
             const selectedKeys = checkboxes.filter(box => box.checked).map(box => box.dataset.presetEvent);
-            content.querySelector('#dynevt-preset-dependency-list').innerHTML = renderPresetDependencies(
-                preset,
-                components,
-                selectedKeys,
-            );
+            const dependencyList = content.querySelector('#dynevt-preset-dependency-list');
+            if (dependencyList) dependencyList.innerHTML = renderPresetDependencies(preset, components, selectedKeys);
         };
         const syncDependencies = (changedBox) => {
             const boxesByKey = new Map(checkboxes.map(box => [box.dataset.presetEvent, box]));
@@ -403,11 +450,6 @@ export function showPresetPicker() {
                 toastr.warning('Choose at least one component.', 'Dynamic Events');
                 return;
             }
-            const installOptions = (hasTracks || stateBindings.length || hasSubjectBinding) ? {
-                stateSources: defaultStateSources,
-                stateSource: Object.values(defaultStateSources)[0] || 'sa_relationship_ledger',
-                ...(hasSubjectBinding ? { subject: preset.subjectBinding?.default } : {}),
-            } : {};
             let targetSet;
             if (destination.value === '__new__') {
                 const setName = newName.querySelector('input').value.trim();
@@ -424,11 +466,19 @@ export function showPresetPicker() {
                     return;
                 }
                 targetSet.events ||= [];
+                targetSet.sharedInstructions ||= [];
                 targetSet.stateTracks ||= [];
                 targetSet.promptRouters ||= [];
+                targetSet.scripts ||= [];
+                for (const block of instantiatePresetSharedInstructions(preset, selectedKeys)) {
+                    if (!targetSet.sharedInstructions.some(existing => existing.id === block.id)) {
+                        targetSet.sharedInstructions.push(block);
+                    }
+                }
                 targetSet.events.push(...instantiatePresetEvents(preset, selectedKeys, installOptions));
                 targetSet.stateTracks.push(...instantiatePresetTracks(preset, selectedKeys, installOptions));
                 targetSet.promptRouters.push(...instantiatePresetRouters(preset, selectedKeys, installOptions));
+                targetSet.scripts.push(...instantiatePresetScripts(preset, selectedKeys));
             }
             saveSettings();
             services.selectSet(targetSet.id);
@@ -540,10 +590,19 @@ export function importSets(e) {
 
             // Build old→new ID map so condition references survive import
             const idMap = new Map();
+            const sharedInstructionIdMaps = new Map();
             for (const set of data.eventSets) {
                 const oldSetId = set.id;
                 set.id = generateId('set');
                 idMap.set(oldSetId, set.id);
+                if (!Array.isArray(set.sharedInstructions)) set.sharedInstructions = [];
+                const sharedInstructionIdMap = new Map();
+                for (const block of set.sharedInstructions) {
+                    const oldBlockId = block.id;
+                    block.id = generateId('shared');
+                    sharedInstructionIdMap.set(oldBlockId, block.id);
+                }
+                sharedInstructionIdMaps.set(set.id, sharedInstructionIdMap);
                 for (const evt of set.events) {
                     const oldEvtId = evt.id;
                     evt.id = generateId('evt');
@@ -593,6 +652,10 @@ export function importSets(e) {
                     if (!newParent) set.role = SetRole.PRIMARY;
                 }
                 for (const evt of set.events) {
+                    const sharedInstructionIdMap = sharedInstructionIdMaps.get(set.id) || new Map();
+                    evt.sharedInstructionIds = (evt.sharedInstructionIds || [])
+                        .map(id => sharedInstructionIdMap.get(id))
+                        .filter(Boolean);
                     remapConditionTarget(evt.condition, idMap);
                     evt.phases?.forEach(ph => remapConditionTarget(ph.condition, idMap));
                 }

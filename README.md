@@ -16,6 +16,11 @@ characters or native tags.
   a compatibility mirror.
 - A validated SuperAgents tracker can be used as an optional condition source.
   Dynamic Events still decides whether and when an eligible event fires.
+- Optional Recent Chat keyword conditions match literal words or phrases in the
+  latest user message, latest assistant message, or a bounded recent window.
+  They are evaluated locally with no model or provider call, scan at most 40
+  message records, and share a per-cycle cache across Events, State Tracks,
+  Prompt Routers, and Scripts.
 - SuperAgents Calendar can be used as a branch-aware condition source. Calendar
   consequences require an explicit status such as missed or cancelled; Dynamic
   Events never decides that a fictional date label means time has passed.
@@ -53,6 +58,13 @@ State rules support nested **ALL**, **ANY**, and inverted groups. Validated
 SuperAgents schemas populate source and field menus; the editor also shows each
 rule's current value and pass/fail result.
 
+Recent Chat rules accept up to 50 literal words or phrases, can require any or
+all of them, and default to case-insensitive whole-word/phrase matching. A
+recent-window rule can inspect 1–20 visible non-system messages. Set a
+conditioned Event's interval and initial delay to zero when a fresh phrase
+should prepare an Event for the immediately following response; cooldown and
+probability still control repeats.
+
 Portable paths use `characters.$subject.trust`, never a hardcoded card name.
 Each Event, State Track, and Prompt Router decides what `$subject` means:
 
@@ -64,6 +76,12 @@ Each Event, State Track, and Prompt Router decides what `$subject` means:
   its condition separately for every record in the selected validated collection,
   then chooses the least recently used eligible entry. Optional endpoint fields
   let a relationship edge expose two narrative characters.
+
+In group chats, a character-bound set is active when its bound card is an
+enabled group member. A tag-bound set can match tags on the group or any enabled
+member. Set bindings control where the set runs; each component still chooses
+its own narrative subject. In a character-bound group set with one matching
+member, the Active Card subject resolves to that member.
 
 `{{subject}}` in Event, State Track, or Prompt Router text resolves to that narrative subject.
 Paired Events also provide `{{counterpart}}`; `{{subjectState.field}}` reads a
@@ -81,8 +99,18 @@ Component-list controls are deliberately separate: the square checkbox selects
 an Event, State Track, Prompt Router, or Script for bulk actions; the pill switch enables or
 disables it; and clicking the row opens or closes its editor. The header's
 icon-only controls select/deselect all components, enable/disable all components,
-delete the checked components, or add a component. Hover an icon for its label.
+or delete the checked components. Each component section has its own Add button.
+Hover an icon for its label.
 No Ctrl-click or Shift-click is required.
+
+Each Event Set can also own named **Shared Instructions**. Attach any number of
+these blocks beneath an Event's unique text; when several linked Events fire in
+the same generation, each block is inserted only once per injection destination.
+Use the layered-text button in the Set toolbar to create, edit, or delete blocks
+and see how many Events use each one. Shared blocks are exported with their Set,
+and preset installation brings along only the blocks required by the selected
+Events. Keep subject-specific directions in Event Text; Shared Instructions are
+best for reusable continuity, tone, agency, safety, and formatting guidance.
 
 Each State Track has the same injection controls as an Event: Extension Prompt
 or `{{dynamicEvents}}` macro mode, prompt position, depth, and message role. New
@@ -105,14 +133,52 @@ are present in that same upcoming main generation rather than one turn later.
 
 ## Presets
 
-Open **Manage Events → Presets** to install a disabled, editable copy of:
+Open **Manage Events → Presets** and choose the Events, Prompt Routers, State
+Tracks, or Scripts tab to install a disabled, editable copy of:
 
-Preset components start selected. Use the icon beside **Choose components** to
-deselect all when you only want one model, then check the component you want.
+The installer initially selects the components from the tab you opened, plus
+anything they require. Use the icon beside **Choose components** to change the
+selection.
 
+- Time Skip (a manual Script button that privately plans a neutral narrator
+  transition, offers an editable preview, narrator name, and exact responder
+  choice, then starts a normal swipeable character reply with a temporary
+  direction to establish a playable new scene. The direction remains available
+  for swipes and clears after the user's next message. It uses SuperAgents World
+  State as a time baseline when active, while still working without SuperAgents.)
 - Story Complications
 - Chekhov Setup → Payoff
 - Event Spark
+- Erotic Sparks (nine independent, safe-disabled adult story openings: direct
+  invitations, loaded challenges, Scene State arousal, privacy plus arousal,
+  attraction becoming initiative, jealousy pressure, two tracker-free scheduled
+  wildcards, and a manual send-bar wildcard; every component preserves player
+  authorship and explicitly avoids treating sex as romance)
+- They Make the First Move (seven safe-disabled, tracker-free initiative beats:
+  breaking a self-imposed rule, a thin excuse, terrible timing, a challenge,
+  admitting a selfish want, returning to unfinished tension, and a manual button;
+  each asks an adult NPC to take one concrete action while leaving the player's
+  response open)
+- Bad Ideas (eight independent, safe-disabled darker adult sexual beats:
+  affairs, revenge, secrets as leverage, unequal power, possessive jealousy,
+  deliberate temptation, mutual ruin, and a manual wildcard; automatic beats
+  use Relationship Ledger desire, jealousy, or sexual history and optional Scene
+  State arousal to decide when to run; the manual button needs no tracker)
+- Sexual Complications (ten independent, safe-disabled texture beats for scenes
+  already underway: rhythm, physical limits, mess, changing control, specific
+  wants, awkward reality, practical risk, group geometry, near-discovery, and a
+  manual wildcard; eligibility accepts local sexual language or optional Prompt
+  Base, After Dark, and Scene State signals without requiring any of them)
+- Aftermath & Echoes (ten safe-disabled adult cooldown components: first
+  reactions, physical residue, first words, lingering appetite, group dynamics,
+  control residue, returning to ordinary business, a captured evidence-and-echo
+  pair, and a manual wildcard; bounded local transition cues work independently,
+  while Prompt Base, After Dark, and Scene State can optionally confirm them)
+- Dirty Messages (six presentation-aware, safe-disabled private communication
+  opportunities for off-screen adults: a blunt invitation, unfinished business,
+  a loaded follow-up, a practical question, terrible timing, and almost saying
+  too much; every component uses Phone's `consider` behavior so the active story
+  surface and character may communicate appropriately or withhold)
 - Adaptive Prompt Kit (thirteen independently placeable Prompt Routers backed by
   the optional staged SuperAgents Prompt Base + Prompt NSFW classifiers)
 - World Conditions (four safe-disabled examples that consume validated
@@ -158,6 +224,30 @@ before enabling; attraction, trust, and milestones may
 come from different SuperAgents without duplicating fields. Installs generate
 fresh IDs and remap dependencies within a pack, so multiple copies can coexist safely. Every added
 component starts disabled.
+
+### Bodies & Pairings
+
+**Bodies & Pairings** is a router-only adult preset for prompt presets that want
+conditional physical guidance without carrying every variation all the time.
+Install and enable Prompt Base and Prompt NSFW in SuperAgents, then add the pack
+from Dynamic Events → Presets. Its four components are independently selectable
+and install disabled:
+
+- `{{de_nsfw_physical}}` — shared physical continuity, pacing, limits, and
+  player-authorship boundaries.
+- `{{de_nsfw_focus_body}}` — male, female, nonbinary, intersex, genderless, or
+  unknown focus-character guidance without treating identity as a complete
+  anatomy chart.
+- `{{de_nsfw_pairing_context}}` — m/m, m/f, f/f, or other/unclear physical
+  configuration guidance.
+- `{{de_nsfw_participant_context}}` — solo, paired, group, or unclear active
+  participation, with group positioning and attention kept legible.
+
+Place the outlets in the sexuality/physical-writing area of an ordinary prompt
+preset. Prompt NSFW runs only behind a fresh Prompt Base `nsfw=true` gate, and
+unknown anatomy, history, or participation remains unknown instead of being
+invented. These outlet names deliberately differ from the older Adaptive Prompt
+Kit equivalents so both presets can coexist without producing duplicate text.
 
 ### Adaptive Prompt Kit
 

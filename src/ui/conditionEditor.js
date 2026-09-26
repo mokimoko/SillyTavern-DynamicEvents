@@ -2,6 +2,8 @@ import {
     ConditionBehavior,
     ConditionGroupOperator,
     ConditionType,
+    KeywordMode,
+    KeywordScope,
     createCondition,
     createConditionGroup,
 } from '../../eventEngine.js';
@@ -59,6 +61,7 @@ function renderTypeOptions(condition, providerOnly) {
         ? [
             [ConditionType.NONE, 'None (always eligible)'],
             [ConditionType.GROUP, 'All / any rule group'],
+            [ConditionType.KEYWORD, 'Recent chat keywords'],
             [ConditionType.PROVIDER_STATE, 'Validated SuperAgents state'],
         ]
         : [
@@ -69,10 +72,32 @@ function renderTypeOptions(condition, providerOnly) {
             [ConditionType.FIRE_COUNT, 'Fire count ≥'],
             [ConditionType.IS_SPENT, 'Is spent (one-shot)'],
             [ConditionType.NOT_SPENT, 'Not spent'],
+            [ConditionType.KEYWORD, 'Recent chat keywords'],
             [ConditionType.PROVIDER_STATE, 'Validated SuperAgents state'],
         ];
     return definitions.map(([type, label]) =>
         `<option value="${type}" ${condition.type === type ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+function renderKeywordFields(condition) {
+    const recent = condition.keywordScope === KeywordScope.RECENT;
+    return `
+        <div class="dynevt-field dynevt-field-grow"><label>Keywords or phrases</label>
+            <textarea class="dynevt-textarea" data-node-cond="keywords" rows="3" placeholder="one phrase per line">${esc((condition.keywords || []).join('\n'))}</textarea>
+            <small class="dynevt-hint">Literal matching only. No model or provider call is made.</small></div>
+        <div class="dynevt-field"><label>Search</label><select class="dynevt-select" data-node-cond="keywordScope">
+            <option value="${KeywordScope.LAST_USER}" ${condition.keywordScope === KeywordScope.LAST_USER ? 'selected' : ''}>Latest user message</option>
+            <option value="${KeywordScope.LAST_ASSISTANT}" ${condition.keywordScope === KeywordScope.LAST_ASSISTANT ? 'selected' : ''}>Latest assistant message</option>
+            <option value="${KeywordScope.RECENT}" ${recent ? 'selected' : ''}>Recent visible messages</option>
+        </select></div>
+        ${recent ? `<div class="dynevt-field"><label>Message lookback</label>
+            <input type="number" class="dynevt-input dynevt-input-sm" data-node-cond="keywordLookback" value="${Math.max(1, Math.min(20, Number(condition.keywordLookback) || 4))}" min="1" max="20" /></div>` : ''}
+        <div class="dynevt-field"><label>Match</label><select class="dynevt-select" data-node-cond="keywordMode">
+            <option value="${KeywordMode.ANY}" ${condition.keywordMode !== KeywordMode.ALL ? 'selected' : ''}>Any phrase</option>
+            <option value="${KeywordMode.ALL}" ${condition.keywordMode === KeywordMode.ALL ? 'selected' : ''}>Every phrase</option>
+        </select></div>
+        <label class="dynevt-toggle-label"><input type="checkbox" data-node-cond="keywordWholeWords" ${condition.keywordWholeWords !== false ? 'checked' : ''} /><span>Whole words / phrases</span></label>
+        <label class="dynevt-toggle-label"><input type="checkbox" data-node-cond="keywordCaseSensitive" ${condition.keywordCaseSensitive === true ? 'checked' : ''} /><span>Case sensitive</span></label>`;
 }
 
 function renderProviderFields(condition) {
@@ -144,7 +169,8 @@ function renderNode(condition, path, options, detail = null) {
     const events = allEventOptions(options.excludeEventId);
     const isNone = condition.type === ConditionType.NONE;
     const isProvider = condition.type === ConditionType.PROVIDER_STATE;
-    const needsTarget = !isNone && !isProvider;
+    const isKeyword = condition.type === ConditionType.KEYWORD;
+    const needsTarget = !isNone && !isProvider && !isKeyword;
     const needsPhase = condition.type === ConditionType.PHASE_REACHED;
     const needsCount = condition.type === ConditionType.FIRE_COUNT;
     const targetEvents = needsPhase ? events.filter(event => event.phases?.length > 0) : events;
@@ -161,12 +187,13 @@ function renderNode(condition, path, options, detail = null) {
         ${needsPhase ? `<div class="dynevt-field"><label>Phase ≥</label><select class="dynevt-select" data-node-cond="targetPhase">${phases}</select></div>` : ''}
         ${needsCount ? `<div class="dynevt-field"><label>Count ≥</label><input type="number" class="dynevt-input dynevt-input-sm" data-node-cond="targetCount" value="${condition.targetCount}" min="1" /></div>` : ''}
         ${isProvider ? renderProviderFields(condition) : ''}
+        ${isKeyword ? renderKeywordFields(condition) : ''}
         ${isNone ? '' : '<label class="dynevt-condition-invert"><input type="checkbox" data-node-cond="invert" ' + (condition.invert ? 'checked' : '') + ' /> Invert</label>'}
         ${root && options.showBehavior && !isNone ? `<div class="dynevt-field"><label>If unmet</label><select class="dynevt-select" data-node-cond="behavior">
             <option value="${ConditionBehavior.STALL}" ${condition.behavior === ConditionBehavior.STALL ? 'selected' : ''}>Stall</option>
             <option value="${ConditionBehavior.SKIP}" ${condition.behavior === ConditionBehavior.SKIP ? 'selected' : ''}>Skip phase</option>
         </select></div>` : ''}
-        ${detail ? `<span class="dynevt-track-rule-result ${detail.result ? 'met' : 'unmet'}">${detail.result ? '✓' : '✗'} ${esc(detail.found ? JSON.stringify(detail.actual) : 'missing')}</span>` : ''}
+        ${detail ? `<span class="dynevt-track-rule-result ${detail.result ? 'met' : 'unmet'}">${detail.result ? '✓' : '✗'} ${esc(detail.found ? (isKeyword ? (detail.matched?.join(', ') || 'no match') : JSON.stringify(detail.actual)) : 'missing')}</span>` : ''}
         ${root ? '' : '<button class="dynevt-btn-icon" data-node-action="delete" title="Remove rule"><i class="fa-solid fa-trash"></i></button>'}
     </div>`;
 }
@@ -212,6 +239,9 @@ export function wireConditionEditor(container, condition, onChange, options = {}
                             : createCondition({ type: input.value, behavior }));
                         rebuild = true;
                     } else if (field === 'invert') node.invert = input.checked;
+                    else if (field === 'keywords') node.keywords = input.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean).slice(0, 50);
+                    else if (field === 'keywordLookback') node.keywordLookback = Math.max(1, Math.min(20, parseInt(input.value) || 4));
+                    else if (input.type === 'checkbox') node[field] = input.checked;
                     else if (field === 'targetPhase' || field === 'targetCount') node[field] = parseInt(input.value) || 0;
                     else {
                         node[field] = input.value;
@@ -221,7 +251,7 @@ export function wireConditionEditor(container, condition, onChange, options = {}
                             const fields = describeConditionSource('superagents', node.source)?.fields || [];
                             node.path = fields.find(item => item.path.includes('$subject'))?.path || fields[0]?.path || '';
                         }
-                        rebuild = ['targetEventId', 'operator', 'source'].includes(field);
+                        rebuild = ['targetEventId', 'operator', 'source', 'keywordScope'].includes(field);
                     }
                     commit(rebuild);
                 };

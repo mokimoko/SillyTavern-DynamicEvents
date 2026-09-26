@@ -13,11 +13,13 @@ import { getChatState } from '../runtime/chatState.js';
 import { availableSubjectsFromConditions, renderSubjectEditor, wireSubjectEditor } from './subjectEditor.js';
 import { renderActionEditor, wireActionEditor } from './actionEditor.js';
 import { renderConditionHTML, wireConditionFields } from './conditionEditor.js';
+import { renderSharedInstructionPicker, wireSharedInstructionPicker } from './sharedInstructionEditor.js';
 
 let services = {
     getSelectedEventId: () => null,
     collapsedPhases: new Set(),
     updateEventButtons: () => {},
+    confirm: null,
 };
 
 export function configureEventEditor(nextServices) {
@@ -79,6 +81,8 @@ export function renderEventEditor(set) {
                 <textarea class="dynevt-textarea" data-f="text" rows="3" placeholder="[Scene Direction: ...]">${esc(evt.text)}</textarea>
             </div>
 
+            ${renderSharedInstructionPicker(set, evt)}
+
             ${renderSubjectEditor(evt.subject, {
                 id: `event-${evt.id}`,
                 label: 'Event subject',
@@ -90,9 +94,9 @@ export function renderEventEditor(set) {
             <div class="dynevt-section-label">Schedule Settings</div>
             <div class="dynevt-editor-row">
                 <div class="dynevt-field"><label>Interval Min</label>
-                    <input type="number" class="dynevt-input dynevt-input-sm" data-f="schedule.intervalMin" value="${evt.schedule.intervalMin}" min="1" /></div>
+                    <input type="number" class="dynevt-input dynevt-input-sm" data-f="schedule.intervalMin" value="${evt.schedule.intervalMin}" min="0" /></div>
                 <div class="dynevt-field"><label>Interval Max</label>
-                    <input type="number" class="dynevt-input dynevt-input-sm" data-f="schedule.intervalMax" value="${evt.schedule.intervalMax}" min="1" /></div>
+                    <input type="number" class="dynevt-input dynevt-input-sm" data-f="schedule.intervalMax" value="${evt.schedule.intervalMax}" min="0" /></div>
                 <div class="dynevt-field"><label>Probability (%)</label>
                     <input type="number" class="dynevt-input dynevt-input-sm" data-f="schedule.probability" data-pct value="${Math.round(evt.schedule.probability * 100)}" min="0" max="100" step="5" /></div>
                 <div class="dynevt-field"><label>Cooldown</label>
@@ -154,7 +158,7 @@ export function renderEventEditor(set) {
             </div>
             <div class="dynevt-option-row">
                 <label class="dynevt-toggle-label"><input type="checkbox" id="dynevt-btn-activated" ${evt.buttonActivated ? 'checked' : ''} /><span>Show manual trigger button</span></label>
-                <label class="dynevt-toggle-label" title="For state-source subjects, do not fire this Event twice for the same stable entry key."><input type="checkbox" id="dynevt-once-per-subject" ${evt.oncePerSubject ? 'checked' : ''} /><span>Fire once per resolved subject</span></label>
+                <label class="dynevt-toggle-label" title="Do not fire this Event twice for the same resolved subject key."><input type="checkbox" id="dynevt-once-per-subject" ${evt.oncePerSubject ? 'checked' : ''} /><span>Fire once per resolved subject</span></label>
             </div>
 
             <div class="dynevt-section-label"><i class="fa-solid fa-database" style="font-size:0.85em"></i> Response Capture</div>
@@ -191,6 +195,11 @@ export function renderEventEditor(set) {
     }, {
         allowSubject: true,
         allowCounterpart: Boolean(evt.subject?.counterpartPath),
+    });
+    wireSharedInstructionPicker(el, set, evt, {
+        changed: () => saveSettings(),
+        closed: () => renderEventEditor(set),
+        confirm: services.confirm,
     });
 
     el.querySelector('#dynevt-reset-schedule-state')?.addEventListener('click', () => {

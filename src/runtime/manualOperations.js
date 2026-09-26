@@ -5,6 +5,7 @@ import {
     getScriptStatus,
     isSetActive,
     resolveEventSubjectBinding,
+    resolveSetBindingContext,
     ScheduleType,
 } from '../../eventEngine.js';
 import { getSettings } from '../config/settings.js';
@@ -14,7 +15,8 @@ import { activeSwipeId, cloneRuntimeState } from './branchState.js';
 import { getBindingContext } from './bindingContext.js';
 import { getChatState, saveChatState } from './chatState.js';
 import { runActions } from './eventActions.js';
-import { clearAllInjections, injectEventText, primeInjections } from './injectionManager.js';
+import { clearAllInjections, primeInjections } from './injectionManager.js';
+import { appendSharedInstructions, resolveEventSharedInstructions } from './sharedInstructions.js';
 
 export function forceFireEvent(eventName) {
     const settings = getSettings();
@@ -27,7 +29,7 @@ export function forceFireEvent(eventName) {
             const rawText = event.schedule.type === ScheduleType.PLOT_CHAIN
                 ? event.phases?.[state.currentPhase]?.text || event.text
                 : event.text;
-            const bindingContext = getBindingContext();
+            const bindingContext = resolveSetBindingContext(set, getBindingContext());
             const chat = getContext().chat || [];
             const messageIndex = Math.max(0, chat.length - 1);
             const swipeId = activeSwipeId(chat[messageIndex]);
@@ -39,7 +41,14 @@ export function forceFireEvent(eventName) {
                 resolvedSubjectState: resolved.value,
             };
             const text = renderSubjectText(rawText, resolved.subject, textContext);
-            injectEventText(event.id, text, event.injection);
+            const sharedInstructions = resolveEventSharedInstructions(set, event);
+            const composed = new Map([[event.id, {
+                text,
+                injection: event.injection,
+                sharedInstructions,
+            }]]);
+            appendSharedInstructions(composed);
+            const composedPayload = composed.get(event.id);
             runActions(event.actions, {
                 ...bindingContext,
                 messageIndex,
@@ -51,11 +60,15 @@ export function forceFireEvent(eventName) {
             });
             chatState.pendingEventInjections ||= {};
             chatState.pendingEventInjections[event.id] = {
-                text,
+                text: composedPayload.text,
+                baseText: text,
                 injection: { ...event.injection },
+                sharedInstructionIds: sharedInstructions.map(block => block.id),
                 manual: true,
             };
             saveChatState(chatState, { messageIndex, swipeId });
+            clearAllInjections(settings);
+            primeInjections();
             return `Force-fired: ${event.name}`;
         }
     }
@@ -110,7 +123,12 @@ export function getStatusReport() {
             lines.push(`  ${track.enabled ? '◆' : '◇'} ${track.name}: ${activeState}`);
         }
         for (const router of (set.promptRouters || [])) {
-            const inspection = inspectPromptRouter(router, chatState, context, { messageIndex, swipeId });
+            const inspection = inspectPromptRouter(router, chatState, resolveSetBindingContext(set, context), {
+                messageIndex,
+                swipeId,
+                messages: chat,
+                keywordCache: new Map(),
+            });
             const activeLayers = (router.layers || [])
                 .filter(layer => inspection.activeLayerIds.includes(layer.id))
                 .map(layer => layer.name);

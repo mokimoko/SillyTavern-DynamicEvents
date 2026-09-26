@@ -13,7 +13,7 @@ function collectConditionSources(condition, sources) {
 }
 
 function collectSubjectSource(subject, sources) {
-    if (subject?.mode !== 'state-source'
+    if (!['state-source', 'state-value'].includes(subject?.mode)
         || subject.providerId !== 'superagents'
         || !String(subject.source || '').trim()) return;
     sources.add(String(subject.source).trim());

@@ -3,6 +3,7 @@ export const SubjectMode = Object.freeze({
     TRACKED: 'tracked',
     MANUAL: 'manual',
     STATE_SOURCE: 'state-source',
+    STATE_VALUE: 'state-value',
 });
 
 export function createSubject(overrides = {}) {
@@ -29,7 +30,7 @@ export function resolveSubject(subject, context = {}) {
     if (binding.mode === SubjectMode.TRACKED || binding.mode === SubjectMode.MANUAL) {
         return String(binding.value || '').trim();
     }
-    if (binding.mode === SubjectMode.STATE_SOURCE) {
+    if (binding.mode === SubjectMode.STATE_SOURCE || binding.mode === SubjectMode.STATE_VALUE) {
         return String(context.resolvedSubject || context.charName || '').trim();
     }
     return String(binding.value || context.charName || '').trim();

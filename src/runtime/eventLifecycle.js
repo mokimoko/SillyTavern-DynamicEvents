@@ -42,25 +42,32 @@ export async function onMessageReceived() {
     const beforeEventStates = cloneRuntimeState(chatState.eventStates || {});
     await runScripts(ScriptTiming.AFTER_AI, { chatState, persist: false });
     const bindingContext = getBindingContext();
+    const evaluationContext = {
+        messageIndex,
+        swipeId,
+        chatLength: currentLength,
+        messages: chat,
+        keywordCache: new Map(),
+    };
     const { fired, texts } = evaluateEvents(
         settings.eventSets,
         chatState,
         bindingContext,
         settings.maxConcurrentEvents,
         currentLength,
-        { messageIndex, swipeId, chatLength: currentLength },
+        evaluationContext,
     );
     const trackResult = evaluateStateTracks(
         settings.eventSets,
         chatState,
         bindingContext,
-        { messageIndex, swipeId, chatLength: currentLength },
+        evaluationContext,
     );
     const routerResult = evaluatePromptRouters(
         settings.eventSets,
         chatState,
         bindingContext,
-        { messageIndex, swipeId, chatLength: currentLength },
+        evaluationContext,
     );
     appendCalendarReconciliationCues(
         fired,

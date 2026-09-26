@@ -26,6 +26,10 @@ import {
     registerMacro,
 } from './src/runtime/injectionManager.js';
 import { runScripts } from './src/runtime/scriptRunner.js';
+import {
+    clearTimeSkipReplyPrompt,
+    reconcileTimeSkipReplyPrompt,
+} from './src/runtime/timeSkipPlanner.js';
 import { createChatUi } from './src/ui/chatUi.js';
 import { createPopupController } from './src/ui/popupController.js';
 
@@ -99,7 +103,7 @@ jQuery(async () => {
     getSettings();
     migrateSettings();
     globalThis.DynamicEvents = Object.freeze({
-        version: '0.20.1',
+        version: '0.28.0',
         ui: Object.freeze({
             openPopup: () => popupController.openPopup(),
         }),
@@ -127,6 +131,7 @@ jQuery(async () => {
         // There is no new AI message on chat load, so capture/scrub does not run.
         // Restore exact pending prompts after chat-changed Scripts execute.
         cancelStateCommitPrime();
+        clearTimeSkipReplyPrompt();
         mirrorVisibleState();
         await runScripts(ScriptTiming.CHAT_CHANGED);
         primeInjections();
@@ -150,6 +155,7 @@ jQuery(async () => {
 
     if (event_types.MESSAGE_DELETED) {
         eventSource.on(event_types.MESSAGE_DELETED, () => {
+            reconcileTimeSkipReplyPrompt();
             mirrorVisibleState();
             clearAllInjections(getSettings());
             primeInjections();
@@ -158,10 +164,16 @@ jQuery(async () => {
     }
 
     if (event_types.USER_MESSAGE_RENDERED) {
-        eventSource.on(event_types.USER_MESSAGE_RENDERED, () => runScripts(ScriptTiming.BEFORE_AI));
+        eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
+            clearTimeSkipReplyPrompt();
+            runScripts(ScriptTiming.BEFORE_AI);
+        });
     }
     if (event_types.CHAT_CREATED) {
-        eventSource.on(event_types.CHAT_CREATED, () => runScripts(ScriptTiming.CHAT_CREATED));
+        eventSource.on(event_types.CHAT_CREATED, () => {
+            clearTimeSkipReplyPrompt();
+            runScripts(ScriptTiming.CHAT_CREATED);
+        });
     }
 
     registerMacro();

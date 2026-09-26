@@ -3,13 +3,17 @@ import { extension_settings } from '../../../../../extensions.js';
 import {
     ConditionType,
     InjectionMode,
+    KeywordMode,
+    KeywordScope,
     PromptPosition,
     PromptRole,
     SetRole,
 } from '../../eventEngine.js';
 import { normalizeDynamicActions } from '../actions/actionTypes.js';
 import { ProviderOperator } from '../conditions/providers.js';
-import { migratePresetXmlTags } from '../presets/migrations.js';
+import { getPreset } from '../presets/catalog.js';
+import { syncInstalledPromptSnapshots } from '../presets/installedPromptSync.js';
+import { migrateAftermathSharedInstructions, migratePresetXmlTags } from '../presets/migrations.js';
 import { createSubject } from '../subjects/subjects.js';
 import { createTrackSubject, TrackTransitionMode } from '../tracks/stateTracks.js';
 import {
@@ -52,6 +56,32 @@ function normalizeConditionShape(condition) {
         }
         return condition.conditions.reduce((changed, child) => normalizeConditionShape(child) || changed, false);
     }
+    if (condition.type === ConditionType.KEYWORD) {
+        let changed = false;
+        const defaults = {
+            keywords: [],
+            keywordScope: KeywordScope.LAST_USER,
+            keywordMode: KeywordMode.ANY,
+            keywordLookback: 4,
+            keywordCaseSensitive: false,
+            keywordWholeWords: true,
+        };
+        for (const [key, value] of Object.entries(defaults)) {
+            if (condition[key] !== undefined) continue;
+            condition[key] = value;
+            changed = true;
+        }
+        if (!Array.isArray(condition.keywords)) {
+            condition.keywords = String(condition.keywords || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+            changed = true;
+        }
+        const lookback = Math.max(1, Math.min(20, Number(condition.keywordLookback) || 4));
+        if (condition.keywordLookback !== lookback) {
+            condition.keywordLookback = lookback;
+            changed = true;
+        }
+        return changed;
+    }
     if (condition.type !== ConditionType.PROVIDER_STATE) return false;
     let changed = false;
     const defaults = {
@@ -86,9 +116,11 @@ export function migrateSettings() {
         if (!Array.isArray(set.scripts)) { set.scripts = []; changed = true; }
         if (!Array.isArray(set.stateTracks)) { set.stateTracks = []; changed = true; }
         if (!Array.isArray(set.promptRouters)) { set.promptRouters = []; changed = true; }
+        if (!Array.isArray(set.sharedInstructions)) { set.sharedInstructions = []; changed = true; }
         for (const event of (set.events || [])) {
             if (migratePresetXmlTags(event)) changed = true;
             if (!event.subject) { event.subject = createSubject(); changed = true; }
+            if (!Array.isArray(event.sharedInstructionIds)) { event.sharedInstructionIds = []; changed = true; }
             const hadActions = Array.isArray(event.actions);
             const normalizedActions = normalizeDynamicActions(event.actions);
             if (!hadActions || JSON.stringify(normalizedActions) !== JSON.stringify(event.actions)) {
@@ -100,6 +132,7 @@ export function migrateSettings() {
                 if (normalizeConditionShape(phase.condition)) changed = true;
             }
         }
+        if (migrateAftermathSharedInstructions(set)) changed = true;
         for (const script of set.scripts) {
             if (normalizeConditionShape(script.condition)) changed = true;
         }
@@ -179,6 +212,7 @@ export function migrateSettings() {
             }
         }
     });
+    if (syncInstalledPromptSnapshots(settings, getPreset).changed) changed = true;
     if (changed) saveSettingsDebounced();
 }
 

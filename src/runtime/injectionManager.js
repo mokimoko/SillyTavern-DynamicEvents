@@ -15,6 +15,7 @@ import {
 import { activeSwipeId } from './branchState.js';
 import { getBindingContext } from './bindingContext.js';
 import { getChatState } from './chatState.js';
+import { appendSharedInstructions, resolveEventSharedInstructions } from './sharedInstructions.js';
 
 const LOG_PREFIX = '[DynEvents]';
 const PROMPT_KEY_PREFIX = 'dynevt_';
@@ -146,21 +147,36 @@ export function primeInjections(evaluationOptions = {}) {
         const realState = getChatState();
         const clonedState = structuredClone(realState);
         const bindingContext = getBindingContext();
-        const messageIndex = (getContext().chat || []).length - 1;
-        const swipeId = activeSwipeId(getContext().chat?.[messageIndex]);
-        const evaluationContext = { messageIndex, swipeId, ...evaluationOptions };
+        const messages = getContext().chat || [];
+        const messageIndex = messages.length - 1;
+        const swipeId = activeSwipeId(messages[messageIndex]);
+        const evaluationContext = {
+            messageIndex,
+            swipeId,
+            messages,
+            keywordCache: new Map(),
+            ...evaluationOptions,
+        };
         const definitions = new Map();
         for (const set of settings.eventSets || []) {
             const active = isSetActive(set, bindingContext);
-            for (const event of set.events || []) definitions.set(event.id, { event, active });
+            for (const event of set.events || []) definitions.set(event.id, { event, set, active });
         }
         const texts = new Map();
         for (const [eventId, payload] of Object.entries(realState.pendingEventInjections || {})) {
             const definition = definitions.get(eventId);
             if (!definition || !payload?.text || !payload?.injection) continue;
             if (!payload.manual && (!definition.active || !definition.event.enabled)) continue;
-            texts.set(eventId, { text: payload.text, injection: payload.injection });
+            const sharedInstructions = payload.baseText === undefined
+                ? []
+                : resolveEventSharedInstructions(definition.set, definition.event);
+            texts.set(eventId, {
+                text: payload.baseText ?? payload.text,
+                injection: payload.injection,
+                sharedInstructions,
+            });
         }
+        appendSharedInstructions(texts);
         const trackResult = evaluateStateTracks(
             settings.eventSets,
             clonedState,

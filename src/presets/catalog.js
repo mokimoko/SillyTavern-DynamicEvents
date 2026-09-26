@@ -4,15 +4,20 @@ import {
     ConditionType,
     EventCategory,
     InjectionMode,
+    KeywordMode,
+    KeywordScope,
     PromptPosition,
     PromptRole,
     ScheduleType,
+    ScriptTiming,
     SetRole,
     createCondition,
     createConditionGroup,
     createEvent,
     createEventSet,
     createPhase,
+    createSharedInstruction,
+    createScript,
 } from '../../eventEngine.js';
 import { SubjectMode, createSubject } from '../subjects/subjects.js';
 import {
@@ -41,6 +46,21 @@ const SYSTEM_PROMPT = Object.freeze({
     depth: 0,
     role: PromptRole.SYSTEM,
 });
+
+const EROTIC_SPARK_SHARED_KEY = 'erotic-spark-continuity';
+const EROTIC_SPARK_SHARED_TEXT = '<erotic_spark_guidance>Use established attraction, boundaries, and setting facts. If the sexual premise is unclear, keep the beat small or let it pass.</erotic_spark_guidance>';
+const FIRST_MOVE_SHARED_KEY = 'first-move-continuity';
+const FIRST_MOVE_SHARED_TEXT = '<first_move_guidance>Use {{subject}} if they are a present, clearly adult NPC playing opposite {{user}}; if that names a group or scenario card, choose one relevant present adult NPC from canon. Give the NPC a specific want, a real obstacle or cost, and one completed action of their own that {{user}} can answer. They may be selfish, competitive, awkward, hypocritical, or wrong about the timing; do not smooth the choice into automatic romance, healing, or a confession. Favor a concrete tactic and consequence over stock smirking, vague hints, or asking {{user}} to invent the move. A direct, specific question can be a move. Respect established limits, protection, participants, and setting facts. Do not write {{user}}\'s thoughts, desire, consent, dialogue, or actions. A refusal, withdrawal, impairment, or scene with no plausible desire or charged opening is not an invitation; let the cue pass. If sex is already underway, leave scene progression to the active scene.</first_move_guidance>';
+const BAD_IDEA_SHARED_KEY = 'bad-idea-continuity';
+const BAD_IDEA_SHARED_TEXT = '<bad_idea_guidance>Pick a clearly adult NPC with a sexual motive and a real risk already present in the story. Have them make one deliberate, morally compromised sexual move now. They may lie, use an advantage, break a promise, expose a secret, or pursue someone despite the likely cost. Keep them recognizably themselves. Do not decide {{user}}\'s response.</bad_idea_guidance>';
+const SEXUAL_COMPLICATION_SHARED_KEY = 'sexual-complication-continuity';
+const SEXUAL_COMPLICATION_SHARED_TEXT = '<sexual_complication_guidance>Continue the current sexual action. Keep bodies, limits, protection, participants, and setting facts consistent. If sex is not happening, ignore this cue.</sexual_complication_guidance>';
+const FIRST_TIME_SHARED_KEY = 'first-time-continuity';
+const FIRST_TIME_SHARED_TEXT = '<first_time_guidance>Use established experience, bodies, preferences, and limits. Let the encounter reflect these characters rather than a stock first-time script.</first_time_guidance>';
+const CHANGED_BOUNDARY_SHARED_KEY = 'changed-boundary-continuity';
+const CHANGED_BOUNDARY_SHARED_TEXT = '<changed_boundary_guidance>Use the exact recorded terms and who knows them. A milestone grants nothing beyond what was established.</changed_boundary_guidance>';
+const SEXUAL_AFTERMATH_SHARED_KEY = 'sexual-aftermath-guardrails';
+const SEXUAL_AFTERMATH_SHARED_TEXT = '<sexual_aftermath_guidance>Continue from what happened. Keep bodies, protection, participants, and setting details consistent. If sex is still happening—or never happened—do not force an aftermath.</sexual_aftermath_guidance>';
 
 function stateRule(binding, path, operator, value) {
     return {
@@ -111,6 +131,364 @@ function anyStateRules(...conditions) {
     return { type: ConditionType.GROUP, operator: ConditionGroupOperator.ANY, conditions };
 }
 
+function keywordRule(keywords, scope = KeywordScope.LAST_USER, options = {}) {
+    return {
+        type: ConditionType.KEYWORD,
+        keywords,
+        keywordScope: scope,
+        keywordMode: KeywordMode.ANY,
+        keywordLookback: 4,
+        keywordCaseSensitive: false,
+        keywordWholeWords: true,
+        ...options,
+    };
+}
+
+function stateCharacterSubject(binding) {
+    return {
+        mode: SubjectMode.STATE_SOURCE,
+        providerId: 'superagents',
+        source: `$stateSource:${binding}`,
+        collectionPath: 'characters',
+        subjectPath: '',
+        counterpartPath: '',
+        selection: 'least-recent',
+    };
+}
+
+function stateValueSubject(binding, subjectPath) {
+    return {
+        mode: SubjectMode.STATE_VALUE,
+        providerId: 'superagents',
+        source: `$stateSource:${binding}`,
+        collectionPath: '',
+        subjectPath,
+        counterpartPath: '',
+        selection: 'least-recent',
+    };
+}
+
+function eroticSpark(type, direction) {
+    return {
+        text: `<erotic_spark type="${type}">\n${direction}\n</erotic_spark>`,
+        sharedInstructionKeys: [EROTIC_SPARK_SHARED_KEY],
+    };
+}
+
+function firstMove(type, direction) {
+    return {
+        text: `<first_move type="${type}" character="{{subject}}">\n${direction}\n</first_move>`,
+        sharedInstructionKeys: [FIRST_MOVE_SHARED_KEY],
+    };
+}
+
+function badIdea(type, direction) {
+    return {
+        text: `<bad_idea type="${type}" character="{{subject}}">\n${direction}\n</bad_idea>`,
+        sharedInstructionKeys: [BAD_IDEA_SHARED_KEY],
+    };
+}
+
+function badIdeaDesireRule() {
+    return anyStateRules(
+        stateRule('relationship', 'characters.$subject.attraction', 'gte', 55),
+        stateRule('relationship', 'characters.$subject.milestones', 'contains', 'sexual intimacy established'),
+        stateRule('scene', 'characters.$subject.arousal', 'gte', 60),
+    );
+}
+
+function firstTimeBeat(type, direction) {
+    return {
+        text: `<first_time_beat type="${type}" character="{{subject}}">\n${direction}\n</first_time_beat>`,
+        sharedInstructionKeys: [FIRST_TIME_SHARED_KEY],
+    };
+}
+
+function changedBoundaryBeat(type, direction) {
+    return {
+        text: `<changed_boundary_beat type="${type}" character="{{subject}}">\n${direction}\n</changed_boundary_beat>`,
+        sharedInstructionKeys: [CHANGED_BOUNDARY_SHARED_KEY],
+    };
+}
+
+function dirtyMessageCue(direction) {
+    return `${direction}\n\nTreat this as an occasion, not a required delivery. Consider whether {{subject}} would deliberately contact {{user}} through the canonically available private communication surface. Respect the active presentation, established access, medium, delivery time, privacy, availability, relationship, boundaries, and {{subject}}'s voice. Do not invent a communication method or delivery capability the setting has not established. Never decide {{user}}'s thoughts, feelings, arousal, consent, reply, or actions. Produce no communication if the premise, access, timing, or character choice does not fit.`;
+}
+
+function optionalStateRule(source, path, operator, value) {
+    return {
+        type: ConditionType.PROVIDER_STATE,
+        providerId: 'superagents',
+        source,
+        path,
+        operator,
+        value: String(value),
+    };
+}
+
+const SEXUAL_ACTIVITY_KEYWORDS = Object.freeze([
+    'having sex',
+    'had sex',
+    'fuck me',
+    'fucking me',
+    'fucking you',
+    'fucking him',
+    'fucking her',
+    'fucking them',
+    'fucks me',
+    'fucks you',
+    'fucks him',
+    'fucks her',
+    'fucks them',
+    'fucked',
+    'inside me',
+    'inside you',
+    'inside him',
+    'inside her',
+    'inside them',
+    'was inside me',
+    'was inside you',
+    'was inside him',
+    'was inside her',
+    'was inside them',
+    'pushes inside',
+    'pushed inside',
+    'slides inside',
+    'slid inside',
+    'thrusts into',
+    'thrusting into',
+    'thrust into',
+    'rides him',
+    'rides her',
+    'rides them',
+    'rides me',
+    'rides you',
+    'rode him',
+    'rode her',
+    'rode them',
+    'rode me',
+    'rode you',
+    'sucks his cock',
+    'sucks her cock',
+    'sucks their cock',
+    'sucks my cock',
+    'sucks your cock',
+    'goes down on',
+    'went down on',
+    'eating her out',
+    'eating them out',
+    'eating me out',
+    'eating you out',
+    'ate her out',
+    'ate them out',
+    'ate me out',
+    'ate you out',
+    'penetrates',
+    'penetrated',
+    'penetration',
+    'orgasm',
+    'orgasmed',
+    'climax',
+    'climaxed',
+    'comes inside',
+    'came inside',
+    'cums inside',
+]);
+
+function sexualActivityRule() {
+    return anyStateRules(
+        keywordRule(SEXUAL_ACTIVITY_KEYWORDS, KeywordScope.RECENT, { keywordLookback: 2 }),
+        optionalStateRule('sa_prompt_base', 'nsfw', 'eq', true),
+        optionalStateRule('sa_after_dark', 'active.stageIndex', 'gte', 2),
+        allStateRules(
+            optionalStateRule('sa_state_card', 'characters.$subject.arousal', 'gte', 70),
+            keywordRule([
+                'naked together',
+                'both naked',
+                'fully naked',
+                'between his legs',
+                'between her legs',
+                'between their legs',
+                'between my legs',
+                'between your legs',
+                'under the covers',
+                'on top of me',
+                'on top of you',
+                'on top of him',
+                'on top of her',
+                'on top of them',
+            ], KeywordScope.RECENT, { keywordLookback: 3 }),
+        ),
+    );
+}
+
+function sexualComplication(type, direction) {
+    return {
+        text: `<sexual_complication type="${type}">\n${direction}\n</sexual_complication>`,
+        sharedInstructionKeys: [SEXUAL_COMPLICATION_SHARED_KEY],
+    };
+}
+
+const SEXUAL_AFTERMATH_KEYWORDS = Object.freeze([
+    'after sex',
+    'post-sex',
+    'afterglow',
+    'after they finish',
+    'after he finishes',
+    'after she finishes',
+    'after you finish',
+    'after we finish',
+    'after i finish',
+    'after they finished',
+    'after he finished',
+    'after she finished',
+    'after you finished',
+    'after we finished',
+    'after i finished',
+    'after they had finished',
+    'after he had finished',
+    'after she had finished',
+    'after you had finished',
+    'after we had finished',
+    'after i had finished',
+    "after they'd finished",
+    "after he'd finished",
+    "after she'd finished",
+    "after you'd finished",
+    "after we'd finished",
+    "after i'd finished",
+    'once they finish',
+    'once he finishes',
+    'once she finishes',
+    'once you finish',
+    'once we finish',
+    'once i finish',
+    'once they finished',
+    'once he finished',
+    'once she finished',
+    'once you finished',
+    'once we finished',
+    'once i finished',
+    'once they had finished',
+    'once he had finished',
+    'once she had finished',
+    'once you had finished',
+    'once we had finished',
+    'once i had finished',
+    "once they'd finished",
+    "once he'd finished",
+    "once she'd finished",
+    "once you'd finished",
+    "once we'd finished",
+    "once i'd finished",
+    'when they are done',
+    'when he is done',
+    'when she is done',
+    'when you are done',
+    'when we are done',
+    'when i am done',
+    'when they were done',
+    'when he was done',
+    'when she was done',
+    'when you were done',
+    'when we were done',
+    'when i was done',
+]);
+
+const SEXUAL_COOLDOWN_KEYWORDS = Object.freeze([
+    'pulls out',
+    'pulled out',
+    'pulls away',
+    'pulled away',
+    'slips out',
+    'slipped out',
+    'rolls off',
+    'rolled off',
+    'catches his breath',
+    'catches her breath',
+    'catches their breath',
+    'catching his breath',
+    'catching her breath',
+    'catching their breath',
+    'catching my breath',
+    'catching your breath',
+    'catching our breath',
+    'caught his breath',
+    'caught her breath',
+    'caught their breath',
+    'caught my breath',
+    'caught your breath',
+    'caught our breath',
+    'cleaning up',
+    'cleaned up',
+    'cleans himself',
+    'cleans herself',
+    'cleans themself',
+    'cleaned himself',
+    'cleaned herself',
+    'cleaned themself',
+    'cleaned myself',
+    'cleaned yourself',
+    'wipes himself',
+    'wipes herself',
+    'wipes themself',
+    'wiped himself',
+    'wiped herself',
+    'wiped themself',
+    'wiped myself',
+    'wiped yourself',
+    'gets dressed',
+    'getting dressed',
+    'got dressed',
+    'puts his clothes on',
+    'puts her clothes on',
+    'puts their clothes on',
+    'put his clothes on',
+    'put her clothes on',
+    'put their clothes on',
+    'put my clothes on',
+    'put your clothes on',
+    'put our clothes on',
+]);
+
+function sexualAftermathRule() {
+    const recentActivity = () => keywordRule(
+        SEXUAL_ACTIVITY_KEYWORDS,
+        KeywordScope.RECENT,
+        { keywordLookback: 5 },
+    );
+    return anyStateRules(
+        keywordRule(SEXUAL_AFTERMATH_KEYWORDS, KeywordScope.RECENT, { keywordLookback: 3 }),
+        allStateRules(
+            recentActivity(),
+            keywordRule(SEXUAL_COOLDOWN_KEYWORDS, KeywordScope.RECENT, { keywordLookback: 2 }),
+        ),
+        allStateRules(
+            recentActivity(),
+            { ...keywordRule(SEXUAL_ACTIVITY_KEYWORDS, KeywordScope.LAST_ASSISTANT), invert: true },
+        ),
+        allStateRules(
+            recentActivity(),
+            optionalStateRule('sa_prompt_base', 'nsfw', 'eq', false),
+        ),
+        allStateRules(
+            recentActivity(),
+            optionalStateRule('sa_after_dark', 'active.stageIndex', 'gte', 4),
+        ),
+        allStateRules(
+            recentActivity(),
+            optionalStateRule('sa_state_card', 'characters.$subject.arousal', 'lte', 25),
+        ),
+    );
+}
+
+function sexualAftermath(type, direction) {
+    return {
+        text: `<sexual_aftermath type="${type}">\n${direction}\n</sexual_aftermath>`,
+        sharedInstructionKeys: [SEXUAL_AFTERMATH_SHARED_KEY],
+    };
+}
+
 function relationshipMilestone(value) {
     return stateRule('milestones', 'characters.$subject.milestones', 'contains', value);
 }
@@ -128,8 +506,24 @@ function betrayalEstablishedRule() {
 
 export const BUILT_IN_PRESETS = Object.freeze([
     {
+        id: 'time-skip',
+        version: 1,
+        name: 'Time Skip',
+        description: 'A manual story transition. Choose when to resume, add optional context for the gap, and start the next reply. Uses SuperAgents World State when it is active.',
+        tags: ['time', 'scene transition', 'manual'],
+        setName: 'Preset — Time Skip',
+        scripts: [{
+            key: 'time-skip',
+            name: 'Time Skip',
+            description: 'Adds a send-bar button that opens the Time Skip chooser.',
+            builtInAction: 'time-skip',
+            buttonActivated: true,
+            trigger: { timing: ScriptTiming.MANUAL },
+        }],
+    },
+    {
         id: 'story-complications',
-        version: 2,
+        version: 3,
         name: 'Story Complications',
         description: 'A menu of independent story disruptions. Pick any combination to introduce setbacks, returning history, severe crises, changing weather, or illness on a schedule.',
         tags: ['setbacks', 'surprises', 'world events'],
@@ -141,7 +535,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Periodically introduces a plausible setback connected to the current scene, goals, or risks.',
                 category: EventCategory.FLAVOR,
                 priority: 10,
-                text: '[Scene Direction: Introduce a plausible setback based on the active goals, risks, and established setting. Let it complicate the scene without erasing prior progress or forcing actions for {{user}}.]',
+                text: '[Something goes wrong: Introduce one believable setback tied to the current goal, risk, or setting. Make it matter, but keep earlier progress intact. DON’T choose {{user}}’s response.]',
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 8, intervalMax: 16, probability: 0.35, cooldown: 12, initialDelay: 8 },
             },
             {
@@ -150,7 +544,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Once per chat, brings back a person, consequence, obligation, or unresolved incident from the character’s established past.',
                 category: EventCategory.PLOT,
                 priority: 50,
-                text: '[Scene Direction: Reintroduce a person, consequence, obligation, or unresolved incident from {{char}}\'s established past. Seed it naturally and preserve existing canon.]',
+                text: '[The past comes back: Bring in one person, consequence, obligation, or unfinished problem from {{char}}\'s established history. Work it in naturally. DON’T invent new history or contradict canon.]',
                 schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 3, intervalMax: 8, probability: 1, cooldown: 0, initialDelay: 45 },
             },
             {
@@ -159,7 +553,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Once per chat, begins a serious crisis with lasting consequences after the story has had time to develop.',
                 category: EventCategory.PLOT,
                 priority: 70,
-                text: '[Scene Direction: A serious setting-appropriate crisis begins. Telegraph it clearly, leave room for character response, and create lasting consequences without dictating {{user}}\'s choices.]',
+                text: '[A serious crisis begins: Make it fit the setting. Give the characters enough warning to react, and let the consequences last. DON’T dictate {{user}}\'s choices or resolve the crisis immediately.]',
                 schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 5, intervalMax: 12, probability: 0.5, cooldown: 0, initialDelay: 70 },
             },
             {
@@ -168,7 +562,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Occasionally changes the weather in a dramatic but setting-appropriate way that affects the current scene.',
                 category: EventCategory.WORLD,
                 priority: 15,
-                text: '[World Event: Shift the weather in a dramatic but seasonally and geographically plausible way. Show concrete effects on the current scene and avoid repeating a recent weather event.]',
+                text: '[The weather changes: Make it dramatic enough to affect the scene, but believable for this place and season. Show what it does to visibility, movement, clothing, shelter, sound, or plans. DON’T repeat a recent weather beat.]',
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 18, intervalMax: 35, probability: 0.3, cooldown: 24, initialDelay: 18 },
             },
             {
@@ -177,14 +571,14 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Once per chat, has the current character begin showing gradual signs of illness or exhaustion.',
                 category: EventCategory.FLAVOR,
                 priority: 15,
-                text: '[Recent Development: {{char}} begins showing setting-appropriate signs of illness or exhaustion. Establish symptoms gradually; do not decide {{user}}\'s diagnosis or response.]',
+                text: '[{{char}} is getting sick or worn down: Start with one or two believable signs and let them build gradually. Fit the symptoms to the setting and circumstances. DON’T diagnose them for {{user}} or decide how {{user}} reacts.]',
                 schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 4, intervalMax: 10, probability: 0.4, cooldown: 0, initialDelay: 55 },
             },
         ],
     },
     {
         id: 'world-conditions',
-        version: 1,
+        version: 2,
         name: 'World Conditions',
         description: 'Turns validated World State environment and clock facts into occasional scene pressure without changing the weather, inventing precise time, or treating an inferred date as a deadline.',
         tags: ['world state', 'environment', 'time of day', 'weather', 'travel'],
@@ -203,7 +597,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Occasionally lets established evening or nighttime conditions affect access, visibility, routine, safety, or social behavior.',
                 category: EventCategory.WORLD,
                 priority: 20,
-                text: '<world_condition>World State currently establishes evening or nighttime. Let that fact create one proportionate, setting-specific consequence through visibility, access, public activity, fatigue, transport, routine, or social expectations. Preserve the tracked clock and location. Do not invent a danger merely because it is dark, force {{user}}\'s response, or resolve a major outcome.</world_condition>',
+                text: '<world_condition>It is evening or night. Make that matter once through visibility, access, crowds, fatigue, transport, routine, or local expectations. Keep the current time and place. Darkness alone does not mean danger. DON’T choose {{user}}\'s response or settle a major outcome.</world_condition>',
                 condition: anyStateRules(
                     stateRule('world', 'timeOfDay', 'eq', 'Evening'),
                     stateRule('world', 'timeOfDay', 'eq', 'Night'),
@@ -217,7 +611,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Makes already-established severe weather matter physically or logistically without scheduling a new storm.',
                 category: EventCategory.WORLD,
                 priority: 35,
-                text: '<world_condition>World State already establishes severe weather. Carry one concrete consequence into the scene through sound, visibility, travel, shelter, clothing, infrastructure, timing, or ordinary behavior. Do not change the tracked weather, escalate it into a disaster without canon, inflict automatic injury, or decide {{user}}\'s action.</world_condition>',
+                text: '<world_condition>Severe weather is already happening. Show one concrete effect on sound, visibility, travel, shelter, clothing, infrastructure, timing, or ordinary behavior. Keep the tracked weather as-is. DON’T turn it into a disaster, injure anyone automatically, or decide {{user}}\'s action.</world_condition>',
                 condition: anyStateRules(
                     stateRule('world', 'weather', 'eq', 'Heavy Rain'),
                     stateRule('world', 'weather', 'eq', 'Downpour'),
@@ -236,7 +630,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Lets established outdoor temperature extremes impose believable, bounded practical pressure.',
                 category: EventCategory.WORLD,
                 priority: 30,
-                text: '<world_condition>World State establishes that the active scene is outdoors in an extreme temperature. Show one proportionate practical effect on comfort, endurance, equipment, pace, or the need for shelter. Respect existing clothing, species, magic, technology, and acclimatization. Do not impose automatic injury or dictate {{user}}\'s response.</world_condition>',
+                text: '<world_condition>The scene is outdoors in extreme heat or cold. Show one practical effect on comfort, stamina, equipment, pace, or the need for shelter. Account for clothing, species, magic, technology, and acclimatization already in canon. DON’T inflict automatic injury or choose {{user}}\'s response.</world_condition>',
                 condition: allStateRules(
                     stateRule('world', 'setting', 'eq', 'Outdoors'),
                     anyStateRules(
@@ -253,7 +647,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Occasionally makes an established vehicle or in-transit scene obey its physical and social limitations.',
                 category: EventCategory.FLAVOR,
                 priority: 20,
-                text: '<world_condition>World State establishes that the active scene is aboard or using a vehicle. Let one ordinary constraint of that specific mode of travel matter: movement, noise, privacy, route, schedule, space, etiquette, access, or dependence on an operator. Keep it proportionate and canonical; do not manufacture a breakdown, accident, or delay unless already supported.</world_condition>',
+                text: '<world_condition>They are traveling by vehicle. Make one ordinary limitation of that vehicle matter: movement, noise, privacy, route, schedule, space, etiquette, access, or reliance on a driver or crew. Keep it small and believable. DON’T invent a breakdown, crash, or delay without support.</world_condition>',
                 condition: stateRule('world', 'setting', 'eq', 'Vehicle'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 12, intervalMax: 24, probability: 0.3, cooldown: 18, initialDelay: 8 },
             },
@@ -261,7 +655,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'chekhov-setup-payoff',
-        version: 2,
+        version: 3,
         name: 'Chekhov Setup → Payoff',
         description: 'Creates a two-part plot thread: first establish an ordinary detail, then bring that same detail back later when it can matter.',
         tags: ['foreshadowing', 'setup and payoff'],
@@ -273,7 +667,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Introduces one unobtrusive object, document, name, or fact and saves a short description of it.',
                 category: EventCategory.PLOT,
                 priority: 90,
-                text: '[Scene Direction: Introduce one specific incidental object, document, name, or fact that fits the setting. Do not spotlight it. After the narrative output: <!--DE:chekhovDetail:SHORT DESCRIPTION-->]',
+                text: '[Plant one detail: Introduce a specific object, document, name, or fact that belongs in this setting. Treat it as incidental; DON’T spotlight its future importance. After the narrative output: <!--DE:chekhovDetail:SHORT DESCRIPTION-->]',
                 capture: { enabled: true, varName: 'chekhovDetail' },
                 injection: SYSTEM_PROMPT,
                 schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 12, intervalMax: 25, probability: 1, cooldown: 0, initialDelay: 4 },
@@ -285,7 +679,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 requires: ['setup'],
                 category: EventCategory.PLOT,
                 priority: 95,
-                text: '[Scene Direction: The previously established detail {{getvar::chekhovDetail}} becomes directly relevant to the current conflict or goal. Refer to it specifically and preserve how it was established.]',
+                text: '[Pay off the planted detail: Make {{getvar::chekhovDetail}} directly useful, dangerous, revealing, or troublesome to the current goal or conflict. Refer to the exact detail and keep how it was originally established intact.]',
                 injection: SYSTEM_PROMPT,
                 condition: { type: ConditionType.IS_SPENT, targetKey: 'setup' },
                 schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 15, intervalMax: 35, probability: 1, cooldown: 0, initialDelay: 8 },
@@ -294,7 +688,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'event-spark',
-        version: 2,
+        version: 3,
         name: 'Event Spark',
         description: 'Adds occasional, lightweight surprises—such as a message, mistake, visitor, hazard, discovery, or shift in the social dynamic—to keep scenes from becoming predictable.',
         tags: ['random events', 'variety'],
@@ -305,16 +699,1185 @@ export const BUILT_IN_PRESETS = Object.freeze([
             description: 'On eligible turns, chooses one context-appropriate surprise from a varied list and works it into the next response.',
             category: EventCategory.FLAVOR,
             priority: 20,
-            text: 'Work one of the following into this response, chosen to fit current canon: {{random::a brief background detail::a character mistake::an urgent message::an unexpected visitor::a physical hazard::a public event people are discussing::a petty local drama::a reason to go somewhere::a loose thread that invites action::a subtle shift in the power dynamic}}. Keep it brief unless it naturally becomes the scene focus. Do not write actions or dialogue for {{user}}.',
+            text: 'Add one thing that fits the current story: {{random::a telling background detail::a character making a mistake::an urgent message::an unexpected visitor::a physical hazard::a public event people are talking about::petty local drama::a reason to go somewhere::a loose thread someone can act on::a small shift in who has the upper hand}}. Keep it brief unless the scene naturally grabs onto it. DON’T write {{user}}’s actions or dialogue.',
             schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 1, probability: 0.3, cooldown: 0, initialDelay: 0 },
         }],
     },
     {
-        id: 'adaptive-prompt-starter',
+        id: 'erotic-sparks',
+        version: 5,
+        name: 'Erotic Sparks',
+        description: 'Independent adult story openings driven by local phrases, optional Scene State or Relationship Ledger signals, low-frequency scheduling, and a manual wildcard. It favors character initiative and erotic variety without treating sex as romance.',
+        tags: ['adult', 'nsfw', 'initiative', 'keywords', 'state-aware', 'anti-romance'],
+        setName: 'Preset — Erotic Sparks',
+        sharedInstructions: [{
+            key: EROTIC_SPARK_SHARED_KEY,
+            name: 'Erotic Spark Continuity',
+            text: EROTIC_SPARK_SHARED_TEXT,
+        }],
+        stateBindings: [
+            {
+                key: 'scene',
+                label: 'Scene State arousal',
+                path: 'characters.$subject.arousal',
+                preferredSources: ['sa_state_card'],
+            },
+            {
+                key: 'milestones',
+                label: 'Relationship attraction and pressure',
+                path: 'characters.$subject.attraction',
+                preferredSources: ['sa_relationship_ledger'],
+            },
+        ],
+        events: [
+            {
+                key: 'invitation-stays-live',
+                name: 'The Invitation Stays Live',
+                description: 'Recognizes a direct physical or sexual invitation in the latest user message and keeps the relevant adult character from retreating into passive or romanticized discussion.',
+                category: EventCategory.PLOT,
+                priority: 48,
+                ...eroticSpark('invitation', '{{user}} just gave a direct invitation. Let the relevant NPC take them up on it in a way that sounds and feels like that character; DON’T make {{user}} repeat it. Stay inside what was actually offered. The NPC may ask, offer, move closer, position themself, or make the next move within the invitation’s terms.'),
+                condition: keywordRule([
+                    'kiss me',
+                    'touch me',
+                    'take it off',
+                    'take your clothes off',
+                    'get undressed',
+                    'come to bed',
+                    'get in bed',
+                    'i want you',
+                    'on your knees',
+                    "don't stop",
+                    'keep going',
+                    'show me what you want',
+                    'tell me what you want',
+                ]),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 0, probability: 0.75, cooldown: 7, initialDelay: 0 },
+            },
+            {
+                key: 'challenge-turns-loaded',
+                name: 'A Challenge Turns Loaded',
+                description: 'Lets a dare, taunt, or provocative challenge acquire erotic force when the established adult dynamic can genuinely support that reading.',
+                category: EventCategory.FLAVOR,
+                priority: 36,
+                ...eroticSpark('challenge', 'A recent challenge has room to turn sexual. If that fits the established dynamic, let the NPC accept it, twist it, or answer with a bold move, teasing leverage, competitive escalation, or an unmistakable offer. Match the actual relationship. If the challenge is plainly nonsexual, leave it that way.'),
+                condition: keywordRule([
+                    'prove it',
+                    'i dare you',
+                    "you wouldn't",
+                    'make me',
+                    'try me',
+                    "bet you can't",
+                    'is that all',
+                    'show me',
+                ], KeywordScope.RECENT, { keywordLookback: 3 }),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 0, probability: 0.45, cooldown: 9, initialDelay: 0 },
+            },
+            {
+                key: 'body-gives-away',
+                name: 'The Body Gives Them Away',
+                description: 'Uses a present adult character’s elevated Scene State arousal to let physical awareness affect behavior without forcing confession or romance.',
+                category: EventCategory.FLAVOR,
+                priority: 34,
+                subject: stateCharacterSubject('scene'),
+                ...eroticSpark('physical-tell', '{{subject}} is aroused enough that their body or behavior gives something away. Show one specific tell: a lapse in composure, an adjustment, a change in distance or attention, or an attempt to hide or manage it. Fit the tell to {{subject}}’s body and personality. It can be tempting, funny, frustrating, or embarrassing without becoming a confession, proposition, or tender moment.'),
+                condition: stateRule('scene', 'characters.$subject.arousal', 'gte', 35),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 2, probability: 0.34, cooldown: 8, initialDelay: 0 },
+            },
+            {
+                key: 'privacy-changes-equation',
+                name: 'Privacy Changes the Equation',
+                description: 'Combines an established privacy cue with elevated Scene State arousal so opportunity matters without assuming privacy itself is sexual.',
+                category: EventCategory.PLOT,
+                priority: 42,
+                subject: stateCharacterSubject('scene'),
+                ...eroticSpark('privacy', '{{subject}} is already affected, and they finally have believable privacy. Let them notice what they can do without witnesses and take one character-specific step: close the distance, make an offer, show their intent, arrange the space, test a boundary, or refuse to waste the opening. Use the opening within their established boundaries.'),
+                condition: allStateRules(
+                    keywordRule([
+                        "we're alone",
+                        'we are alone',
+                        'we were alone',
+                        'they were alone',
+                        'no one can hear',
+                        'no one will hear',
+                        'no one could hear',
+                        'lock the door',
+                        'locked the door',
+                        'had locked the door',
+                        'private room',
+                        'sharing a bed',
+                        'were sharing a bed',
+                        'shared a bed',
+                        'only one bed',
+                        'in the shower',
+                        'in the bath',
+                    ], KeywordScope.RECENT, { keywordLookback: 4 }),
+                    stateRule('scene', 'characters.$subject.arousal', 'gte', 20),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 1, probability: 0.5, cooldown: 10, initialDelay: 0 },
+            },
+            {
+                key: 'stops-pretending',
+                name: 'They Stop Pretending',
+                description: 'Uses sustained attraction plus comfort or familiarity to give an adult character one chance to replace vague tension with a deliberate move.',
+                category: EventCategory.PLOT,
+                priority: 46,
+                subject: stateCharacterSubject('relationship'),
+                oncePerSubject: true,
+                ...eroticSpark('deliberate-move', '{{subject}} is strongly attracted to {{user}} and knows them well enough to stop hiding behind endless tension. Have {{subject}} make one deliberate, unmistakably sexual move that fits their personality and the moment. It can be blunt, playful, calculating, awkward, selfish, confident, or risky.'),
+                condition: allStateRules(
+                    stateRule('relationship', 'characters.$subject.attraction', 'gte', 60),
+                    anyStateRules(
+                        stateRule('relationship', 'characters.$subject.comfort', 'gte', 30),
+                        stateRule('relationship', 'characters.$subject.familiarity', 'gte', 40),
+                    ),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 3, probability: 0.38, cooldown: 12, initialDelay: 1 },
+            },
+            {
+                key: 'jealousy-gets-physical',
+                name: 'Jealousy Gets Physical',
+                description: 'Lets meaningful jealousy and attraction produce a provocative bid for attention without presenting possessiveness as love or entitlement.',
+                category: EventCategory.PLOT,
+                priority: 40,
+                subject: stateCharacterSubject('relationship'),
+                ...eroticSpark('jealousy', '{{subject}} is attracted and jealous. Turn that pressure into one concrete sexual or provocative choice: compete for attention, show off, interrupt a charged moment, issue a challenge, get pointedly demonstrative, or create a private confrontation. Keep the choice specific to {{subject}}.'),
+                condition: allStateRules(
+                    stateRule('relationship', 'characters.$subject.attraction', 'gte', 40),
+                    stateRule('relationship', 'characters.$subject.jealousy', 'gte', 55),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 2, intervalMax: 6, probability: 0.3, cooldown: 14, initialDelay: 2 },
+            },
+            {
+                key: 'convenient-accident',
+                name: 'A Convenient Accident',
+                description: 'Occasionally creates a setting-appropriate practical mishap or coincidence that produces physical opportunity without requiring any tracker.',
+                category: EventCategory.FLAVOR,
+                priority: 22,
+                ...eroticSpark('convenient-accident', 'Create one small, believable accident that puts the relevant characters in an unexpectedly physical situation: awkward proximity, a disrupted routine, troublesome clothing or equipment, a shared task, an object passed hand to hand, an inconvenient position, or a need for help. Let the NPC decide what to do with the opening. Keep the accident small and plausible.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 10, intervalMax: 18, probability: 0.26, cooldown: 14, initialDelay: 6 },
+            },
+            {
+                key: 'bad-idea-excellent-timing',
+                name: 'Bad Idea, Excellent Timing',
+                description: 'Rarely surfaces the most entertaining established temptation, social risk, inappropriate timing, or mutually questionable opportunity available now.',
+                category: EventCategory.PLOT,
+                priority: 28,
+                ...eroticSpark('bad-idea', 'Put one sexual temptation within reach that is already a bad idea because of the timing, place, rivalry, duty, secrecy, social risk, power, old habits, practical fallout, or plain selfishness. Let an NPC notice it or go after it. Risk does not make the moment romantic, destined, or healing. DON’T invent coercion, impairment, taboo, or a power imbalance just to make it darker.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 14, intervalMax: 26, probability: 0.2, cooldown: 20, initialDelay: 10 },
+            },
+            {
+                key: 'manual-wildcard',
+                name: 'Manual Erotic Wildcard',
+                description: 'Adds a send-bar button for an immediate character-specific erotic development while remaining inert as an automatic Event.',
+                category: EventCategory.CUSTOM,
+                priority: 50,
+                buttonActivated: true,
+                ...eroticSpark('manual-wildcard', 'Add one strong sexual development the scene can use right now. Choose the people, physical opportunity, social or power dynamic, and tone from canon, then have a relevant NPC actually do something. Be specific and entertaining; skip generic yearning. It can be horny, playful, messy, funny, kinky, selfish, dark, risky, casual, or a terrible idea.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 1, probability: 0, cooldown: 0, initialDelay: 0 },
+            },
+        ],
+    },
+    {
+        id: 'they-make-the-first-move',
+        version: 1,
+        name: 'They Make the First Move',
+        description: 'Character-driven adult initiative: flawed motives, concrete choices, and an opening for the player to answer. Works without trackers and does not assume that attraction is consent.',
+        tags: ['adult', 'nsfw', 'initiative', 'character agency', 'anti-repetition'],
+        setName: 'Preset — They Make the First Move',
+        sharedInstructions: [{
+            key: FIRST_MOVE_SHARED_KEY,
+            name: 'First Move Continuity',
+            text: FIRST_MOVE_SHARED_TEXT,
+        }],
+        subjectBinding: {
+            label: 'Who may make the first move',
+            description: 'Defaults to the active card. Choose a specific tracked character when a scenario or group card should not choose for itself.',
+            default: { mode: SubjectMode.ACTIVE_CARD, value: '' },
+        },
+        events: [
+            {
+                key: 'rule-they-break',
+                name: 'The Rule They Break',
+                description: 'Lets a character knowingly act against an established rule they made for themself, without turning the choice into a confession or promise.',
+                category: EventCategory.PLOT,
+                priority: 42,
+                ...firstMove('rule-they-break', 'Only if this NPC has an established self-imposed rule about {{user}}, intimacy, rivalry, duty, or the relationship, have them knowingly break that exact rule through one concrete offer or action. Show what the rule costs them and why they choose this moment. Do not invent a past rule, announce that everything has changed, or claim {{user}} accepts the breach.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 9, intervalMax: 17, probability: 0.3, cooldown: 16, initialDelay: 5 },
+            },
+            {
+                key: 'excuse-is-thin',
+                name: 'The Excuse Is Embarrassingly Thin',
+                description: 'Lets a character engineer a plausible reason to stay, return, or create an opening, then reveal what they actually want.',
+                category: EventCategory.PLOT,
+                priority: 38,
+                ...firstMove('thin-excuse', 'If the scene supports attraction or charged curiosity, let the NPC use a plausible practical excuse to stay, return, help, or ask for a private moment. Make the excuse specific to their life and circumstances, then let their real purpose become legible through something they do or say now. Do not manufacture an emergency, erase witnesses, or make {{user}} go along.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 7, intervalMax: 14, probability: 0.34, cooldown: 13, initialDelay: 4 },
+            },
+            {
+                key: 'terrible-timing-their-choice',
+                name: 'Terrible Timing, Their Choice',
+                description: 'Lets an NPC choose a charged moment despite a real inconvenience, obligation, or social cost already in the scene.',
+                category: EventCategory.PLOT,
+                priority: 36,
+                ...firstMove('terrible-timing', 'Only if an established obligation, deadline, social complication, or inconvenient setting makes this a genuinely bad moment, let the NPC decide to make a move anyway. Give them a specific action or proposition and preserve the practical consequence of their timing. Do not invent coercion, danger, impairment, or a power imbalance to make the choice more dramatic.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 12, intervalMax: 22, probability: 0.27, cooldown: 19, initialDelay: 8 },
+            },
+            {
+                key: 'make-it-a-challenge',
+                name: 'They Make It a Challenge',
+                description: 'Turns a canon-supported rivalry or provocative exchange into a specific dare, wager, or pointed invitation from the NPC.',
+                category: EventCategory.PLOT,
+                priority: 40,
+                ...firstMove('challenge', 'A recent dare, taunt, wager, or competitive exchange may give this NPC an opening. If their dynamic with {{user}} supports a sexual reading, have the NPC initiate one concrete challenge or pointed invitation in their own voice. Give the challenge real stakes for the NPC; do not reinterpret an ordinary nonsexual dispute as desire or decide that {{user}} accepts.'),
+                condition: keywordRule([
+                    'i dare you', 'prove it', "you wouldn't", 'try me', 'make me',
+                    'bet you', 'is that all', 'show me', 'challenge', 'wager',
+                ], KeywordScope.RECENT, { keywordLookback: 3 }),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 0, probability: 0.42, cooldown: 10, initialDelay: 0 },
+            },
+            {
+                key: 'selfish-part',
+                name: 'They Say the Selfish Part',
+                description: 'Lets a character name a specific desire or selfish motive without laundering it into romance or a reassuring speech.',
+                category: EventCategory.PLOT,
+                priority: 39,
+                ...firstMove('selfish-part', 'When desire is already credible, have the NPC say the particular thing they want from {{user}} and back it with one action they control: an offer, a changed plan, an invitation, or a deliberate risk. Their motive may be petty, convenient, competitive, lonely, or purely physical if that fits. Do not turn the admission into an automatic declaration of love, entitlement, or a summary of {{user}}\'s feelings.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 8, intervalMax: 16, probability: 0.32, cooldown: 14, initialDelay: 5 },
+            },
+            {
+                key: 'unfinished-part',
+                name: 'They Come Back for the Unfinished Part',
+                description: 'Lets a character deliberately reopen a specific interrupted opportunity while honoring later refusals or changed circumstances.',
+                category: EventCategory.PLOT,
+                priority: 37,
+                ...firstMove('unfinished-part', 'Only if canon contains a specific mutual or still-open charged moment that was interrupted rather than refused, let the NPC bring that exact loose end back now. They should choose a new concrete tactic shaped by what interrupted them, not merely repeat the old line. Do not invent a prior agreement, treat silence as consent, or pursue after {{user}} has declined or moved on.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 9, intervalMax: 18, probability: 0.3, cooldown: 16, initialDelay: 6 },
+            },
+            {
+                key: 'manual-first-move',
+                name: 'Manual First Move',
+                description: 'Adds a send-bar button for one immediate, character-specific move without automatic scheduling.',
+                category: EventCategory.CUSTOM,
+                priority: 52,
+                buttonActivated: true,
+                ...firstMove('manual', 'Give a relevant adult NPC one decisive, character-specific move now. Find a credible desire, friction, and tactic in canon, then complete an action they control and leave {{user}} a real choice. Make the choice capable of creating tension or consequences even if {{user}} does not reciprocate. If no sexual premise fits, use a smaller charged move or let the cue pass.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 1, probability: 0, cooldown: 0, initialDelay: 0 },
+            },
+        ],
+    },
+    {
+        id: 'bad-ideas',
         version: 2,
+        name: 'Bad Ideas',
+        description: 'Opt-in darker adult sexual Events gated by Relationship Ledger desire, jealousy, or sexual history and optional Scene State arousal. Each component remains independent and leaves the player response open.',
+        tags: ['adult', 'nsfw', 'dark tropes', 'sexual tension', 'character agency'],
+        setName: 'Preset — Bad Ideas',
+        sharedInstructions: [{
+            key: BAD_IDEA_SHARED_KEY,
+            name: 'Bad Idea Continuity',
+            text: BAD_IDEA_SHARED_TEXT,
+        }],
+        subjectBinding: {
+            label: 'Who makes the bad move',
+            description: 'Defaults to the active card. Bind a specific tracked adult character when the card represents a group or scenario.',
+            default: { mode: SubjectMode.ACTIVE_CARD, value: '' },
+        },
+        stateBindings: [
+            {
+                key: 'relationship',
+                label: 'Relationship Ledger desire and jealousy',
+                path: 'characters.$subject.attraction',
+                description: 'Provides attraction, jealousy, and established sexual-history milestones for the active adult character.',
+                preferredSources: ['sa_relationship_ledger'],
+            },
+            {
+                key: 'scene',
+                label: 'Scene State arousal',
+                path: 'characters.$subject.arousal',
+                description: 'Provides an alternate current desire signal when attraction history is unavailable.',
+                preferredSources: ['sa_state_card'],
+            },
+        ],
+        events: [
+            {
+                key: 'affair-starts-here',
+                name: 'The Affair Starts Here',
+                description: 'An adult NPC in an established exclusive relationship makes a direct sexual invitation despite the betrayal it would entail.',
+                category: EventCategory.PLOT,
+                priority: 45,
+                ...badIdea('affair', 'If {{subject}} or the person they want is already in an exclusive relationship, have {{subject}} make an unmistakable invitation to have sex anyway. Let them choose a time, place, or cover story they can actually arrange. Do not invent a relationship, claim acceptance, or skip ahead to the encounter.'),
+                condition: badIdeaDesireRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 14, intervalMax: 24, probability: 0.24, cooldown: 24, initialDelay: 8 },
+            },
+            {
+                key: 'sex-as-revenge',
+                name: 'Sex as Revenge',
+                description: 'An NPC uses a genuine sexual interest to strike at an established rival or grievance.',
+                category: EventCategory.PLOT,
+                priority: 42,
+                ...badIdea('revenge', 'If {{subject}} has both sexual interest and a specific grievance against someone, have them make a direct sexual move partly to hurt, defy, or outmaneuver that person. Make the target of their revenge and the move itself specific. Desire and spite may coexist; do not replace either with a harmless flirtation.'),
+                condition: badIdeaDesireRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 15, intervalMax: 27, probability: 0.23, cooldown: 25, initialDelay: 9 },
+            },
+            {
+                key: 'secret-is-leverage',
+                name: 'The Secret Is Leverage',
+                description: 'An NPC uses an existing secret to engineer a private, sexually charged confrontation.',
+                category: EventCategory.PLOT,
+                priority: 44,
+                ...badIdea('leverage', 'If {{subject}} holds a real secret that matters to someone they want, have them use that knowledge to arrange a private encounter on their terms. They may show what they know, offer concealment, or make the risk of exposure clear, then state their sexual intent directly. Do not decide whether the other person agrees to anything.'),
+                condition: badIdeaDesireRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 16, intervalMax: 28, probability: 0.2, cooldown: 26, initialDelay: 10 },
+            },
+            {
+                key: 'power-gets-personal',
+                name: 'Power Gets Personal',
+                description: 'An established status or authority gap enters an overt sexual proposition.',
+                category: EventCategory.PLOT,
+                priority: 45,
+                ...badIdea('power', 'If {{subject}} has real authority, status, or control over access that affects the person they want, have them use that advantage to create an opening and make a direct sexual proposition. Show exactly what they control and why the offer is loaded. Do not erase the imbalance or decide the answer.'),
+                condition: badIdeaDesireRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 17, intervalMax: 30, probability: 0.2, cooldown: 28, initialDelay: 10 },
+            },
+            {
+                key: 'possessive-display',
+                name: 'Possession on Display',
+                description: 'Sexual jealousy becomes an overt move meant to provoke an established rival.',
+                category: EventCategory.PLOT,
+                priority: 41,
+                ...badIdea('possessive-display', 'If {{subject}} is sexually interested and an established rival is present or close enough to learn what happens, have them make a possessive sexual proposition or display meant to be noticed. Let jealousy make the choice sharper and less flattering. Do not assign ownership of anyone or decide that the person approached welcomes it.'),
+                condition: allStateRules(
+                    stateRule('relationship', 'characters.$subject.attraction', 'gte', 40),
+                    stateRule('relationship', 'characters.$subject.jealousy', 'gte', 55),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 13, intervalMax: 25, probability: 0.24, cooldown: 23, initialDelay: 8 },
+            },
+            {
+                key: 'corruption-game',
+                name: 'The Corruption Game',
+                description: 'An NPC deliberately tempts another adult to break a sexual rule or value they have actually expressed.',
+                category: EventCategory.PLOT,
+                priority: 43,
+                ...badIdea('corruption', 'If another adult has clearly stated a sexual boundary, vow, or rule that they are now tempted to reconsider, have {{subject}} knowingly make a sexual offer that tests that exact commitment. Give {{subject}} a personal reason to want the breach. Do not invent the rule, rewrite a refusal as temptation, or decide that the other person gives in.'),
+                condition: badIdeaDesireRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 15, intervalMax: 28, probability: 0.22, cooldown: 26, initialDelay: 9 },
+            },
+            {
+                key: 'mutual-ruin',
+                name: 'Mutual Ruin',
+                description: 'An NPC knowingly restarts a sexual involvement with an established cost for both people.',
+                category: EventCategory.PLOT,
+                priority: 44,
+                ...badIdea('mutual-ruin', 'If {{subject}} and another adult have an established sexual history or live temptation that could seriously damage both their lives, have {{subject}} take a concrete step to restart it now. They may arrive somewhere they promised to avoid, offer a key, change a plan, or make a blunt invitation. Let the risk remain real without jumping ahead to the response or fallout.'),
+                condition: badIdeaDesireRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 16, intervalMax: 29, probability: 0.22, cooldown: 27, initialDelay: 10 },
+            },
+            {
+                key: 'manual-bad-idea',
+                name: 'Manual Bad Idea',
+                description: 'Adds a send-bar button for an immediate dark adult sexual move without automatic scheduling.',
+                category: EventCategory.CUSTOM,
+                priority: 55,
+                buttonActivated: true,
+                ...badIdea('manual', 'Choose the strongest established dark sexual premise available now: an affair, revenge, a secret used as leverage, an unequal position, possessive jealousy, deliberate temptation, or mutual ruin. Have {{subject}} make the relevant sexual move immediately. If canon includes an explicit adult consensual control-play arrangement, that may be the premise instead. Leave the response to the person approached open.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 1, probability: 0, cooldown: 0, initialDelay: 0 },
+            },
+        ],
+    },
+    {
+        id: 'sexual-complications',
+        version: 5,
+        name: 'Sexual Complications',
+        description: 'Independent adult scene-texture beats that activate from local sexual language or optional Prompt Base, After Dark, and Scene State signals. They add variety after sex is underway without turning it into romance.',
+        tags: ['adult', 'nsfw', 'scene texture', 'keywords', 'optional state', 'anti-repetition'],
+        setName: 'Preset — Sexual Complications',
+        sharedInstructions: [{
+            key: SEXUAL_COMPLICATION_SHARED_KEY,
+            name: 'Sexual Complication Continuity',
+            text: SEXUAL_COMPLICATION_SHARED_TEXT,
+        }],
+        events: [
+            {
+                key: 'change-rhythm',
+                name: 'Change the Rhythm',
+                description: 'Breaks a repetitive sexual loop by changing pace, angle, position, initiative, or focus while preserving the established encounter.',
+                category: EventCategory.FLAVOR,
+                priority: 34,
+                ...sexualComplication('rhythm', 'Change something that physically matters: pace, position, angle, pressure, focus, who takes initiative, or the act itself. Someone adjusts because they want something different or because their body responds to what is happening. Make the change concrete and specific to the character. DON’T describe the same motion with new adjectives or turn the adjustment into an emotional revelation.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 2, intervalMax: 5, probability: 0.34, cooldown: 8, initialDelay: 1 },
+            },
+            {
+                key: 'bodies-have-limits',
+                name: 'Bodies Have Limits',
+                description: 'Makes fatigue, balance, friction, oversensitivity, preparation, refractory response, or another established physical limit matter without automatically ending the scene.',
+                category: EventCategory.FLAVOR,
+                priority: 32,
+                ...sexualComplication('physical-limit', 'Make one believable physical limit matter: fatigue, leverage, balance, reach, flexibility, friction, lube, preparation, soreness, cramping, oversensitivity, breath, refractory time, an existing injury, or anatomy already established. The characters can adjust, use it, joke about it, work around it, or stop. Follow what they actually choose.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 3, intervalMax: 7, probability: 0.28, cooldown: 10, initialDelay: 2 },
+            },
+            {
+                key: 'mess-becomes-real',
+                name: 'The Mess Becomes Real',
+                description: 'Lets sweat, fluids, clothing, bedding, furniture, toys, or cleanup logistics become materially present instead of keeping sex frictionless and pristine.',
+                category: EventCategory.FLAVOR,
+                priority: 26,
+                ...sexualComplication('mess', 'Make the mess physically present: sweat, fluids, smeared makeup, shoved-aside clothing, tangled bedding, a noisy or unstable surface, a lost item, a toy that needs attention, marks, scent, or cleanup. Let someone react in character—amused, annoyed, turned on, practical, embarrassed, territorial about an object, or completely unbothered. DON’T invent permanent marks, damage, exposure, or emotional meaning.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 3, intervalMax: 8, probability: 0.28, cooldown: 11, initialDelay: 2 },
+            },
+            {
+                key: 'control-shifts',
+                name: 'Control Shifts',
+                description: 'Changes who sets the pace or directs the encounter without equating dominance, initiative, or yielding with unlimited permission.',
+                category: EventCategory.PLOT,
+                priority: 38,
+                ...sexualComplication('control-shift', 'Shift who controls one part of the encounter: pace, position, access, attention, restraint, instructions, teasing, denial, or when to continue. Someone may seize it, offer it, fight over it, reverse it for fun, or reveal that the control was never secure. Match established personalities and permissions. Keep the shift limited to this act.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 3, intervalMax: 7, probability: 0.3, cooldown: 11, initialDelay: 2 },
+            },
+            {
+                key: 'someone-gets-specific',
+                name: 'Someone Gets Specific',
+                description: 'Lets an adult participant reveal or act on a concrete preference already supported by behavior, canon, or the present encounter.',
+                category: EventCategory.PLOT,
+                priority: 36,
+                ...sexualComplication('specific-want', 'Let one NPC get specific about what they want next. They can ask, instruct, demonstrate, reposition someone, use an established object, or refuse more generic repetition. Base the want on canon, shown behavior, or the physical logic of this encounter. If no kink is established, choose a simple preference instead of inventing a defining fetish. Desire can be blunt, selfish, playful, technical, shy, demanding, or strange.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 3, intervalMax: 7, probability: 0.3, cooldown: 10, initialDelay: 2 },
+            },
+            {
+                key: 'awkward-reality',
+                name: 'Awkward Reality Intrudes',
+                description: 'Adds an embodied mistake, failed maneuver, inconvenient sound, misplaced object, or unglamorous adjustment without dissolving the erotic scene.',
+                category: EventCategory.FLAVOR,
+                priority: 24,
+                ...sexualComplication('awkward-reality', 'Let one ordinary awkward thing happen: an angle does not work, a maneuver fails, a limb goes numb, somebody makes an inconvenient sound, hair or clothing gets caught, an object goes missing, timing gets crossed, an adjustment is thoroughly unsexy, or somebody laughs at the wrong moment. Let them handle it in character and keep going, redirect, or use it. Keep the response proportionate.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 4, intervalMax: 9, probability: 0.24, cooldown: 12, initialDelay: 3 },
+            },
+            {
+                key: 'practical-risk',
+                name: 'Practical Risk Matters',
+                description: 'Brings an already plausible concern—noise, privacy, protection, contraception, evidence, time, or location—into the encounter without manufacturing a crisis.',
+                category: EventCategory.WORLD,
+                priority: 34,
+                ...sexualComplication('practical-risk', 'Make one practical concern demand attention: noise, privacy, interruption, protection, contraception, lube, cleanup, evidence, time, an unsafe surface, clothes needed afterward, or the limits of this location. It can sharpen the thrill, require an adjustment, start an argument, or force a choice. DON’T invent pregnancy, infection, discovery, punishment, broken equipment, or a new setting rule as an accomplished fact.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 4, intervalMax: 9, probability: 0.24, cooldown: 13, initialDelay: 3 },
+            },
+            {
+                key: 'group-geometry',
+                name: 'Group Geometry Changes',
+                description: 'When recent language establishes multiple adult participants, changes attention, positioning, turn-taking, cooperation, or rivalry instead of reducing the scene to one active pair.',
+                category: EventCategory.PLOT,
+                priority: 40,
+                ...sexualComplication('group-geometry', 'Several participants are involved. Keep everyone physically and socially present instead of letting somebody turn into furniture. Redirect attention, change positions, let someone choose to watch, ask for cooperation, create competition, switch pairings or turns, or give one person a separate want. Keep each person’s knowledge, boundaries, and personality straight. DON’T assume equal enthusiasm, add another participant, or make jealousy romantic by default.'),
+                condition: allStateRules(
+                    sexualActivityRule(),
+                    keywordRule([
+                        'both of you',
+                        'both of them',
+                        'the three of us',
+                        'all three of us',
+                        'all of us',
+                        'take turns',
+                        'taking turns',
+                        'took turns',
+                        'watch us',
+                        'watch them',
+                        'watched us',
+                        'watched them',
+                        'join us',
+                        'joins them',
+                        'joined us',
+                        'joined them',
+                        'the three of them',
+                        'all three of them',
+                        'between the two of them',
+                        'between both of them',
+                    ], KeywordScope.RECENT, { keywordLookback: 4 }),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 4, probability: 0.4, cooldown: 9, initialDelay: 1 },
+            },
+            {
+                key: 'almost-caught',
+                name: 'Almost Caught',
+                description: 'Adds a credible near-discovery only after sex is underway, creating immediate pressure without automatically stopping or exposing the participants.',
+                category: EventCategory.PLOT,
+                priority: 30,
+                ...sexualComplication('near-discovery', 'Give them one believable sign that privacy may not last: a sound outside, approaching footsteps, a device or signal, a voice, nearby movement, or a schedule catching up. This is almost being caught, not automatic exposure. Let the NPCs freeze, hide evidence, quiet down, hurry, risk it on purpose, enjoy the tension, or stop. DON’T invent surveillance, a voyeur, punishment, or a specific intruder without canon.'),
+                condition: sexualActivityRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 7, intervalMax: 14, probability: 0.18, cooldown: 18, initialDelay: 6 },
+            },
+            {
+                key: 'manual-complication',
+                name: 'Manual Sexual Complication',
+                description: 'Adds a send-bar button for one immediate, scene-specific complication while remaining inert automatically.',
+                category: EventCategory.CUSTOM,
+                priority: 50,
+                buttonActivated: true,
+                ...sexualComplication('manual-wildcard', 'Add one strong complication to the encounter right now. Choose whatever would help most—rhythm, position, a physical limit, mess, control, a specific want, a prop, humor, group attention, practical risk, or nearly being caught—and make it change what the NPCs do next. Favor character-specific sexual detail over melodrama, generic escalation, another repetitive climax, or sudden tenderness.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 1, probability: 0, cooldown: 0, initialDelay: 0 },
+            },
+        ],
+    },
+    {
+        id: 'aftermath-echoes',
+        version: 6,
+        name: 'Aftermath & Echoes',
+        description: 'Independent adult cooldown beats that notice a recent sexual scene ending through bounded local language, with optional Prompt Base, After Dark, and Scene State confirmation. The pack favors physical, practical, funny, awkward, or unresolved consequences over automatic romance.',
+        tags: ['adult', 'nsfw', 'aftermath', 'keywords', 'optional state', 'continuity'],
+        setName: 'Preset — Aftermath & Echoes',
+        sharedInstructions: [{
+            key: SEXUAL_AFTERMATH_SHARED_KEY,
+            name: 'Sexual Aftermath Guardrails',
+            text: SEXUAL_AFTERMATH_SHARED_TEXT,
+        }],
+        events: [
+            {
+                key: 'first-thing-they-do',
+                name: 'The First Thing They Do',
+                description: 'Gives an adult NPC one immediate, character-specific post-sex action without prescribing affection, regret, or emotional revelation.',
+                category: EventCategory.FLAVOR,
+                priority: 36,
+                ...sexualAftermath('first-reaction', 'Show the first thing one relevant NPC deliberately does when the encounter eases: move away or closer, check their body, reach for something, laugh, stare, complain, clean up, reclaim space, light something, or make a practical demand. Let the action show who they are.'),
+                condition: sexualAftermathRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 1, probability: 0.42, cooldown: 8, initialDelay: 0 },
+            },
+            {
+                key: 'bodies-keep-receipt',
+                name: 'Bodies Keep the Receipt',
+                description: 'Carries one plausible physical consequence of the encounter into the cooldown instead of resetting every body and room to pristine condition.',
+                category: EventCategory.FLAVOR,
+                priority: 30,
+                ...sexualAftermath('physical-residue', 'Keep one believable physical remainder in the scene: cooling sweat, soreness, oversensitivity, fatigue, thirst, scent, fluids, a mark, displaced clothes, tangled hair, an unsteady leg, a cramped muscle, a used object, or disturbed furniture. Let someone respond in character. DON’T invent an injury, pregnancy, infection, permanent mark, or emotional significance.'),
+                condition: sexualAftermathRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 2, probability: 0.36, cooldown: 9, initialDelay: 0 },
+            },
+            {
+                key: 'post-sex-mouth',
+                name: 'Post-Sex Mouth',
+                description: 'Lets the first spoken beat be blunt, funny, technical, awkward, satisfied, critical, or deliberately absent rather than obligatorily tender.',
+                category: EventCategory.FLAVOR,
+                priority: 34,
+                ...sexualAftermath('first-words', 'Give one NPC the first verbal beat—or make their refusal to speak impossible to miss. They might joke, give a practical instruction, criticize, boast, ask a question, make an observation or request, keep the dirty talk going, change the subject, or choose pointed silence. Match their voice.'),
+                condition: sexualAftermathRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 2, probability: 0.34, cooldown: 10, initialDelay: 0 },
+            },
+            {
+                key: 'another-round-option',
+                name: 'Another Round Is Still an Option',
+                description: 'Occasionally preserves unresolved appetite without automatically restarting sex or converting desire into affection.',
+                category: EventCategory.PLOT,
+                priority: 26,
+                ...sexualAftermath('lingering-appetite', 'If an NPC would plausibly want more, leave one small sign: lingering attention, a teasing touch, a blunt offer, refusal to get dressed, competitive dissatisfaction, checking the time, or deliberately leaving access open. Another round is an option, not a foregone conclusion. If nobody wants more, show that the encounter is firmly over instead.'),
+                condition: sexualAftermathRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 3, probability: 0.2, cooldown: 14, initialDelay: 1 },
+            },
+            {
+                key: 'group-aftermath',
+                name: 'Group Aftermath',
+                description: 'When recent language establishes multiple adult participants, keeps the group socially and physically legible after the activity stops.',
+                category: EventCategory.PLOT,
+                priority: 40,
+                ...sexualAftermath('group-aftermath', 'Several participants were involved. Show how they redistribute attention, space, objects, cleanup, privacy, jokes, friction, or plans after the sex eases. Keep every person distinct; their reactions do not need to match. DON’T collapse them into a sudden cuddle pile, invent jealousy, assume equal satisfaction, or forget someone who was there.'),
+                condition: allStateRules(
+                    sexualAftermathRule(),
+                    keywordRule([
+                        'both of you',
+                        'both of them',
+                        'the three of us',
+                        'all three of us',
+                        'all of us',
+                        'take turns',
+                        'taking turns',
+                        'took turns',
+                        'watch us',
+                        'watch them',
+                        'watched us',
+                        'watched them',
+                        'join us',
+                        'joins them',
+                        'joined us',
+                        'joined them',
+                        'the three of them',
+                        'all three of them',
+                        'between the two of them',
+                        'between both of them',
+                    ], KeywordScope.RECENT, { keywordLookback: 5 }),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 2, probability: 0.45, cooldown: 10, initialDelay: 0 },
+            },
+            {
+                key: 'control-residue',
+                name: 'Control Does Not Reset Cleanly',
+                description: 'Carries a scene-specific power or initiative imbalance into one post-sex choice without turning it into ownership or a new relationship status.',
+                category: EventCategory.PLOT,
+                priority: 38,
+                ...sexualAftermath('control-residue', 'Let the scene’s established balance of initiative or control affect one choice after sex: who moves first, gives an instruction, refuses help, handles cleanup, claims an object, decides whether to stay, restores formal distance, or finds that their authority ended with the act. Keep it limited to the actual dynamic. Let any shift in control end or continue according to the established dynamic.'),
+                condition: sexualAftermathRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 0, intervalMax: 2, probability: 0.28, cooldown: 11, initialDelay: 0 },
+            },
+            {
+                key: 'get-dressed-act-normal',
+                name: 'Get Dressed, Act Normal',
+                description: 'Moves the story back toward duties, secrecy, travel, work, danger, or ordinary routine while preserving physical continuity.',
+                category: EventCategory.WORLD,
+                priority: 32,
+                ...sexualAftermath('return-to-plot', 'Bring one practical reality back: clothes, cleanup, time, privacy, work, duty, travel, danger, someone nearby, a promise, a task, or the need to look normal. Let an NPC start that transition in character. Keep bodies, clothing, objects, and positions continuous. DON’T manufacture an interruption, discovery, punishment, guilt, or relationship talk just to move the plot.'),
+                condition: sexualAftermathRule(),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 4, probability: 0.3, cooldown: 12, initialDelay: 1 },
+            },
+            {
+                key: 'evidence-left-behind',
+                name: 'Evidence Left Behind',
+                description: 'Once per chat, establishes and captures one specific, plausible trace that can matter again later.',
+                category: EventCategory.PLOT,
+                priority: 42,
+                ...sexualAftermath('evidence', 'Leave behind one specific, believable trace: an object out of place, a stain, scent, mark, damaged item, forgotten clothing, changed room detail, message, or noise someone may remember. Nobody has to discover it now, and it does not guarantee exposure. Keep exactly what it is straight for later. After the narrative output: <!--DE:eroticAftermathTrace:SHORT DESCRIPTION OF THE TRACE-->'),
+                capture: { enabled: true, varName: 'eroticAftermathTrace' },
+                condition: sexualAftermathRule(),
+                schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 0, intervalMax: 2, probability: 0.55, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'evidence-returns',
+                name: 'The Evidence Returns',
+                description: 'Later brings the captured trace back as a concrete continuity echo without guaranteeing scandal or discovery.',
+                requires: ['evidence-left-behind'],
+                category: EventCategory.PLOT,
+                priority: 44,
+                text: '<sexual_aftermath type="echo">Bring this earlier trace back in a concrete way: {{getvar::eroticAftermathTrace}}. Someone may notice it, misread it, recognize it, hide it, remove it, question it, use it, or stumble over it during another task. Keep the exact trace and who could know about it straight. Keep discovery and interpretation contingent on who can encounter the trace.</sexual_aftermath>',
+                condition: { type: ConditionType.HAS_FIRED, targetKey: 'evidence-left-behind' },
+                schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 6, intervalMax: 14, probability: 0.65, cooldown: 0, initialDelay: 5 },
+            },
+            {
+                key: 'manual-aftermath',
+                name: 'Manual Aftermath Wildcard',
+                description: 'Adds a send-bar button for one immediate, scene-specific aftermath beat while remaining inert automatically.',
+                category: EventCategory.CUSTOM,
+                priority: 50,
+                buttonActivated: true,
+                ...sexualAftermath('manual-wildcard', 'Add one strong aftermath beat the scene can use right now. Choose what fits—body, cleanup, first words, humor, lingering appetite, distance, group dynamics, leftover power, evidence, practical responsibilities, or a return to the larger plot. Make an NPC do something specific. Favor continuity and character over generic cuddling, instant regret, melodrama, romantic validation, or another forced climax.'),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 1, probability: 0, cooldown: 0, initialDelay: 0 },
+            },
+        ],
+    },
+    {
+        id: 'bodies-and-pairings',
+        version: 2,
+        name: 'Bodies & Pairings',
+        description: 'Editable NSFW physical-context routers for the focused character’s established body, m/m, m/f, f/f, or other pairings, and solo, paired, or group participation. It keeps anatomy, positioning, limits, and practical consequences coherent without forcing romance or deciding the player’s response.',
+        tags: ['adult', 'nsfw', 'prompt routing', 'bodies', 'pairings', 'group scenes', 'physical continuity'],
+        setName: 'Preset — Bodies & Pairings',
+        stateBindings: [
+            {
+                key: 'base',
+                label: 'Prompt Base',
+                path: 'nsfw',
+                preferredSources: ['sa_prompt_base'],
+            },
+            {
+                key: 'nsfw',
+                label: 'Prompt NSFW',
+                path: 'participantConfiguration',
+                preferredSources: ['sa_prompt_nsfw'],
+            },
+        ],
+        routers: [
+            {
+                key: 'physical-context-outlet',
+                name: 'Physical Context',
+                description: 'Writes the shared physically coherent NSFW baseline into {{de_nsfw_physical}}.',
+                mode: PromptRouterMode.STACK,
+                injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_physical' },
+                layers: [{
+                    name: 'Active sexual context',
+                    priority: 10,
+                    text: '<nsfw_physicality>Keep track of where everyone is, what their hands, mouths, and limbs are doing, and any clothing, condoms, toys, or furniture involved. Bodies should not teleport between positions. Sex can be awkward, tiring, messy, or physically limited; use lube, preparation, breaks, cleanup, and recovery when the actual act calls for them. Do not invent anatomy, preferences, contraception, protection, or limits that have not been established. Orgasms do not need to happen together—or at all—and they do not automatically end the scene. </nsfw_physicality>',
+                    condition: stateRule('base', 'nsfw', 'eq', true),
+                }],
+            },
+            {
+                key: 'focus-body-outlet',
+                name: 'Focus Body',
+                description: 'Selects body-aware guidance for {{de_nsfw_focus_body}} without treating identity as a complete anatomy chart.',
+                mode: PromptRouterMode.EXCLUSIVE,
+                injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_focus_body' },
+                layers: [
+                    {
+                        name: 'Male focus character',
+                        priority: 10,
+                        text: '<nsfw_focus_body>The focus character is male. Use what the story has actually established about his body; “male” is not a full anatomy sheet. If he has a cock, balls, and/or prostate, keep erections, precum/cum, sensitivity, overstimulation, and refractory periods physically consistent. Do not assume what equipment he has, whether he is fertile, what role he takes, or how dominant or enduring he is just because he is a man.</nsfw_focus_body>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'male')),
+                    },
+                    {
+                        name: 'Female focus character',
+                        priority: 10,
+                        text: '<nsfw_focus_body>The focus character is female. Use what the story has actually established about her body; “female” is not a full anatomy sheet. If she has a pussy/vulva, vagina, clit, and/or uterus, keep lubrication, sensitivity, overstimulation, muscle fatigue, and pregnancy risk physically consistent. Do not assume what equipment she has, whether she is fertile, what role she takes, or how submissive or enduring she is just because she is a woman.</nsfw_focus_body>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'female')),
+                    },
+                    {
+                        name: 'Nonbinary focus character',
+                        priority: 10,
+                        text: '<nsfw_focus_body>The focus character is nonbinary. Use their established body, pronouns, and preferred words. Being nonbinary does not tell you what genitals they have, whether they are fertile, what role they take, or what kind of sex they like. Describe only what the story has established and what is physically happening now.</nsfw_focus_body>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'nonbinary')),
+                    },
+                    {
+                        name: 'Intersex focus character',
+                        priority: 10,
+                        text: '<nsfw_focus_body>The focus character is intersex. Use the exact anatomy and words already established for them. Do not simplify their body into a male or female template, or invent whatever equipment would make the current act easier to write. Their sex characteristics do not decide their identity, fertility, role, or preferences.</nsfw_focus_body>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'intersex')),
+                    },
+                    {
+                        name: 'Genderless focus character',
+                        priority: 10,
+                        text: '<nsfw_focus_body>The focus character is genderless. Do not write them as a man or woman. Use their established body, pronouns, sexual language, and physical limits; do not invent anatomy or force them into a familiar male/female role.</nsfw_focus_body>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'genderless')),
+                    },
+                    {
+                        name: 'Unknown focus body',
+                        priority: 10,
+                        text: '<nsfw_focus_body>The focus character\'s sex or anatomy is unclear. Stay with visible actions and body details the story has already established. Do not invent genitals, fertility, identity, pronouns, sexual role, or physical abilities just to complete a familiar sex scene.</nsfw_focus_body>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'unknown')),
+                    },
+                ],
+            },
+            {
+                key: 'pairing-context-outlet',
+                name: 'Pairing Context',
+                description: 'Selects configuration-aware physical guidance for {{de_nsfw_pairing_context}}.',
+                mode: PromptRouterMode.EXCLUSIVE,
+                injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_pairing_context' },
+                layers: [
+                    {
+                        name: 'M/M pairing',
+                        priority: 10,
+                        text: '<nsfw_pairing_context>For an m/m scene, do not decide who tops or bottoms from personality or masculinity. Sex does not have to mean penetration; oral, handjobs, frotting, toys, and other established acts are valid. If anal penetration happens, account for preparation, lube, positioning, pace, pain or tearing risk, protection, prostate stimulation, fatigue, oversensitivity, and refractory periods. Penetration and simultaneous orgasms are never required.</nsfw_pairing_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'm/m')),
+                    },
+                    {
+                        name: 'M/F pairing',
+                        priority: 10,
+                        text: '<nsfw_pairing_context>For an m/f scene, do not default to penis-in-vagina sex or traditional gender roles. Oral, handjobs, fingering, grinding, toys, anal, and other established acts are just as valid. Pregnancy is only possible when the actual bodies and act make it possible; keep condoms, contraception, preparation, and lube consistent with the story. Account for fatigue, oversensitivity, refractory periods, and orgasms that happen at different times—or not at all.</nsfw_pairing_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'm/f')),
+                    },
+                    {
+                        name: 'F/F pairing',
+                        priority: 10,
+                        text: '<nsfw_pairing_context>For an f/f scene, do not default to scissoring or make both bodies react the same way. Use hands, mouths, grinding, different positions, and established toys or barriers with clear physical detail. Account for lube, reach, leverage, muscle fatigue, oversensitivity, and orgasms that happen at different times—or not at all. Do not invent a penis, penetration, or interchangeable bodies to make the scene easier to write.</nsfw_pairing_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'f/f')),
+                    },
+                    {
+                        name: 'Other or unclear pairing',
+                        priority: 10,
+                        text: '<nsfw_pairing_context>This scene does not fit cleanly into m/m, m/f, or f/f—or there is not enough information to tell. Use the bodies, identities, words, preferences, and limits the story has actually established. Keep the action physically clear without inventing anatomy or squeezing everyone into a binary script.</nsfw_pairing_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'other_or_unclear')),
+                    },
+                ],
+            },
+            {
+                key: 'participant-context-outlet',
+                name: 'Participant Context',
+                description: 'Selects solo, paired, group, or deliberately uncertain participation guidance for {{de_nsfw_participant_context}}.',
+                mode: PromptRouterMode.EXCLUSIVE,
+                injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_participant_context' },
+                layers: [
+                    {
+                        name: 'Solo activity',
+                        priority: 10,
+                        text: '<nsfw_participant_context>One adult is sexually active, with no other confirmed participant. Keep the action centered on that person and whatever parts of their body, objects, and surroundings they can actually use. Watching, receiving a message, or being propositioned does not make someone a participant.</nsfw_participant_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'participantConfiguration', 'eq', 'solo')),
+                    },
+                    {
+                        name: 'Two participants',
+                        priority: 10,
+                        text: '<nsfw_participant_context>Two adults are sexually active. Keep track of their positions, what each person can reach, and who starts each action. Their desire, ability, pace, reactions, satisfaction, and orgasms do not need to match.</nsfw_participant_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'participantConfiguration', 'eq', 'pair')),
+                    },
+                    {
+                        name: 'Group activity',
+                        priority: 10,
+                        text: '<nsfw_participant_context>Three or more adults are sexually active. Keep track of who is touching whom, what everyone can reach or see, where their attention goes, and who currently has the initiative. People can pause, watch, switch partners, receive unequal attention, react differently, or orgasm at different times; do not turn the group into one synchronized body or leave established participants floating in the background. Being present, aroused, invited, or watching is not the same as joining.</nsfw_participant_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'participantConfiguration', 'eq', 'group')),
+                    },
+                    {
+                        name: 'Unclear participation',
+                        priority: 10,
+                        text: '<nsfw_participant_context>It is not clear whether this is solo, paired, or group activity. Only describe people and actions the story has actually established. Presence, watching, fantasy, an invitation, arousal, or standing nearby does not make someone a participant—especially {{user}}.</nsfw_participant_context>',
+                        condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'participantConfiguration', 'eq', 'unclear')),
+                    },
+                ],
+            },
+        ],
+    },
+    {
+        id: 'first-times-changed-boundaries',
+        version: 3,
+        name: 'First Times & Changed Boundaries',
+        description: 'Character-specific first-time beats and later consequences for explicitly established or revised sexual boundaries. Prompt Base supplies the stable focus character, so each enabled Event remembers the right person instead of spending globally.',
+        tags: ['adult', 'nsfw', 'first times', 'boundaries', 'continuity', 'relationship milestones'],
+        setName: 'Preset — First Times & Changed Boundaries',
+        sharedInstructions: [
+            { key: FIRST_TIME_SHARED_KEY, name: 'First Time Continuity', text: FIRST_TIME_SHARED_TEXT },
+            { key: CHANGED_BOUNDARY_SHARED_KEY, name: 'Changed Boundary Continuity', text: CHANGED_BOUNDARY_SHARED_TEXT },
+        ],
+        stateBindings: [
+            {
+                key: 'base',
+                label: 'Prompt Base',
+                path: 'focusCharacter',
+                description: 'Provides the current focused character as the stable per-subject key.',
+                preferredSources: ['sa_prompt_base'],
+            },
+            {
+                key: 'nsfw',
+                label: 'Prompt NSFW',
+                path: 'firstTimeTogether',
+                description: 'Provides evidence-gated first-time, experience, and close-friend context.',
+                preferredSources: ['sa_prompt_nsfw'],
+            },
+            {
+                key: 'relationship',
+                label: 'Relationship Ledger',
+                path: 'characters.$subject.milestones',
+                description: 'Provides exact established and revised-boundary milestones for later consequences.',
+                preferredSources: ['sa_relationship_ledger'],
+            },
+        ],
+        events: [
+            {
+                key: 'nobody-knows-the-script',
+                name: 'Nobody Knows the Script',
+                description: 'Lets a first encounter expose one wrong assumption and create room for an adjustment.',
+                category: EventCategory.FLAVOR,
+                priority: 43,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...firstTimeBeat('wrong-assumption', 'Let {{subject}} make, notice, or correct one small wrong assumption about how this would go: pace, positioning, preferred words, confidence, a practical detail, or what the other person already knows. Give {{subject}} a concrete response: ask, clarify, adjust, laugh it off, slow down, or try another approach.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    stateRule('nsfw', 'firstTimeTogether', 'eq', true),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 3, probability: 0.42, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'the-bluff-slips',
+                name: 'The Bluff Slips',
+                description: 'Lets the focused character’s established inexperience show without reducing them to helplessness or shyness.',
+                category: EventCategory.FLAVOR,
+                priority: 45,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...firstTimeBeat('inexperience-shows', 'Let {{subject}}\'s lack of prior sexual experience show through one character-specific tell: a bluff, an overconfident guess, a practical mistake, a direct question, deliberate observation, copied advice, unexpected caution, or eager experimentation. Inexperience does not make {{subject}} childlike, passive, innocent, submissive, frightened, or incapable.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    anyStateRules(
+                        stateRule('nsfw', 'virginity', 'eq', 'virgin_character'),
+                        stateRule('nsfw', 'virginity', 'eq', 'both'),
+                    ),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 3, probability: 0.48, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'say-it-plainly',
+                name: 'Say It Plainly',
+                description: 'Gives the focused character one honest preference, uncertainty, or limit to voice in their own manner.',
+                category: EventCategory.PLOT,
+                priority: 48,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...firstTimeBeat('plain-communication', 'Have {{subject}} plainly communicate one thing that matters right now: a preference, uncertainty, limit, condition, question, practical concern, or request. Phrase it in {{subject}}\'s own voice; blunt, teasing, formal, hesitant, clinical, demanding, or matter-of-fact can all work. Leave the question open.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    stateRule('nsfw', 'firstTimeTogether', 'eq', true),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 3, probability: 0.46, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'laugh-and-recover',
+                name: 'Laugh and Recover',
+                description: 'Allows a physical or social awkward beat to become character texture rather than failure.',
+                category: EventCategory.FLAVOR,
+                priority: 38,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...firstTimeBeat('humor-and-recovery', 'Let one imperfect detail happen—a missed cue, awkward angle, uncooperative clothing, noise, cramp, collision, misplaced confidence, or badly timed remark—and let {{subject}} respond in a way that sounds like them. Humor may ease, sharpen, or complicate the moment; let embarrassment fit the characters.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    stateRule('nsfw', 'firstTimeTogether', 'eq', true),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 2, intervalMax: 4, probability: 0.34, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'friends-in-new-territory',
+                name: 'Friends in New Territory',
+                description: 'Carries an established close friendship into unfamiliar sexual territory without deciding what the relationship becomes.',
+                category: EventCategory.PLOT,
+                priority: 47,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...firstTimeBeat('friends-crossing-a-line', 'Let the established friendship between {{subject}} and {{user}} matter through one recognizable habit, private joke, old expectation, familiar kindness, known irritation, or moment of startling unfamiliarity. The friendship can help, hinder, or simply color what happens. Let the friendship’s established terms continue to matter.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    stateRule('nsfw', 'firstTimeTogether', 'eq', true),
+                    stateRule('nsfw', 'closeFriends', 'eq', true),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 3, probability: 0.5, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'a-pause-changes-the-pace',
+                name: 'A Pause Changes the Pace',
+                description: 'Lets the focused character reconsider, check, redirect, slow, or stop without scripting the player.',
+                category: EventCategory.PLOT,
+                priority: 50,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...firstTimeBeat('pace-change', 'Give {{subject}} a reason to pause and change the immediate pace: uncertainty, a physical constraint, a new question, an unexpected reaction, a practical interruption, or simply wanting something different. {{subject}} may check in, redirect, slow down, take a break, or stop. Keep the pause specific to its cause.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    stateRule('nsfw', 'firstTimeTogether', 'eq', true),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 3, probability: 0.4, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'a-stated-limit-matters',
+                name: 'A Stated Limit Matters',
+                description: 'Lets an explicitly established sexual boundary shape a later choice without inventing its contents.',
+                category: EventCategory.PLOT,
+                priority: 52,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...changedBoundaryBeat('established-boundary', 'Let an explicitly established sexual boundary involving {{subject}} affect one concrete choice now: what they propose, refuse, avoid, prepare, clarify, or check. Use only terms already present in canon. Respecting a boundary can be quiet and practical; do not turn it into a test, reward, loophole, or proof of virtue.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    relationshipMilestone('sexual boundary explicitly established'),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 2, probability: 1, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'the-terms-have-changed',
+                name: 'The Terms Have Changed',
+                description: 'Makes an explicit boundary revision visible without erasing the old terms or broadening the new ones.',
+                category: EventCategory.PLOT,
+                priority: 54,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...changedBoundaryBeat('revised-boundary', 'Let an explicitly revised sexual boundary involving {{subject}} alter one concrete interaction. Keep the old term and the exact direction of change straight: broader, narrower, conditional, temporary, or replaced are not interchangeable. The revision applies only as far as canon says and is not blanket consent.'),
+                condition: allStateRules(
+                    stateRule('base', 'nsfw', 'eq', true),
+                    relationshipMilestone('sexual boundary explicitly revised'),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 2, probability: 1, cooldown: 0, initialDelay: 0 },
+            },
+            {
+                key: 'the-relationship-has-new-terms',
+                name: 'The Relationship Has New Terms',
+                description: 'Carries an explicit post-intimacy relationship redefinition forward without treating sex itself as the cause.',
+                category: EventCategory.PLOT,
+                priority: 55,
+                subject: stateValueSubject('base', 'focusCharacter'),
+                oncePerSubject: true,
+                ...changedBoundaryBeat('relationship-redefined', 'Show one ordinary consequence of the explicitly redefined relationship between {{subject}} and {{user}}: changed language, expectations, privacy, public behavior, logistics, access, or a newly relevant point of friction. The redefinition—not sex by itself—is the authority. It may be closer, more distant, casual, formal, conditional, temporary, or something else canon actually established.'),
+                condition: allStateRules(
+                    relationshipMilestone('sexual intimacy established'),
+                    relationshipMilestone('relationship redefined after sexual intimacy'),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 2, probability: 1, cooldown: 0, initialDelay: 0 },
+            },
+        ],
+    },
+    {
+        id: 'dirty-messages',
+        version: 2,
+        name: 'Dirty Messages',
+        description: 'Private adult communication opportunities for off-screen characters. Each presentation turns the same neutral cue into its own setting-appropriate surface, and SuperAgents preserves the character\'s choice to communicate or withhold.',
+        tags: ['adult', 'nsfw', 'private communication', 'off-screen', 'phone', 'autonomy', 'presentation-aware'],
+        setName: 'Preset — Dirty Messages',
+        subjectBinding: {
+            label: 'Who may privately contact {{user}}',
+            description: 'Rotates fairly through eligible off-screen characters in Parallel Off-Screen state. The active SuperAgents presentation and the character still decide whether any communication is possible or appropriate.',
+            allowStateSource: true,
+            default: {
+                mode: SubjectMode.STATE_SOURCE,
+                providerId: 'superagents',
+                source: 'sa_parallel',
+                collectionPath: 'characters',
+                selection: 'least-recent',
+            },
+        },
+        stateBindings: [
+            {
+                key: 'parallel',
+                label: 'Parallel character state',
+                path: 'characters.$subject.status',
+                description: 'Provides off-screen status, availability, and current contact intent.',
+                preferredSources: ['sa_parallel'],
+            },
+            {
+                key: 'relationship',
+                label: 'Relationship Ledger',
+                path: 'characters.$subject.attraction',
+                description: 'Provides attraction, comfort, familiarity, and explicit intimacy or boundary milestones.',
+                preferredSources: ['sa_relationship_ledger'],
+            },
+        ],
+        events: [
+            {
+                key: 'blunt-invitation',
+                name: 'A Blunt Invitation',
+                description: 'Lets a strongly attracted off-screen character consider making one direct, character-specific invitation without presuming the player\'s answer.',
+                category: EventCategory.PLOT,
+                priority: 38,
+                text: '',
+                actions: [{
+                    type: 'superagents.phone',
+                    behavior: 'consider',
+                    recipient: { mode: 'subject', value: '' },
+                    reason: dirtyMessageCue('{{subject}} may make one direct sexual or suggestive invitation that fits their established desire, confidence, and relationship with {{user}}. Keep the proposal specific enough to answer, but do not assume access, mutual desire, acceptance, or any broader permission. Desire may be blunt, playful, formal, awkward, practical, selfish, or restrained without becoming romance.'),
+                }],
+                condition: allStateRules(
+                    stateRule('parallel', 'characters.$subject.status', 'eq', 'off-screen'),
+                    stateRule('parallel', 'characters.$subject.availability', 'neq', 'unreachable'),
+                    stateRule('relationship', 'characters.$subject.attraction', 'gte', 60),
+                    anyStateRules(
+                        stateRule('relationship', 'characters.$subject.comfort', 'gte', 30),
+                        stateRule('relationship', 'characters.$subject.familiarity', 'gte', 40),
+                    ),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 12, intervalMax: 24, probability: 0.3, cooldown: 18, initialDelay: 8 },
+            },
+            {
+                key: 'unfinished-business',
+                name: 'Unfinished Business',
+                description: 'Lets an established interrupted encounter, proposition, or charged exchange resurface without inventing one.',
+                category: EventCategory.PLOT,
+                priority: 36,
+                text: '',
+                actions: [{
+                    type: 'superagents.phone',
+                    behavior: 'consider',
+                    recipient: { mode: 'subject', value: '' },
+                    reason: dirtyMessageCue('A real encounter, proposition, or charged exchange involving {{subject}} and {{user}} may have left unfinished business. Only use one specific loose end already established in canon. {{subject}} may reopen it, clarify it, challenge it, postpone it, or deliberately leave it unresolved; do not invent a prior promise, act, or agreement.'),
+                }],
+                condition: allStateRules(
+                    stateRule('parallel', 'characters.$subject.status', 'eq', 'off-screen'),
+                    stateRule('parallel', 'characters.$subject.availability', 'neq', 'unreachable'),
+                    anyStateRules(
+                        stateRule('relationship', 'characters.$subject.milestones', 'contains', 'sexual intimacy established'),
+                        allStateRules(
+                            stateRule('relationship', 'characters.$subject.attraction', 'gte', 45),
+                            stateRule('relationship', 'characters.$subject.familiarity', 'gte', 30),
+                        ),
+                    ),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 14, intervalMax: 28, probability: 0.28, cooldown: 20, initialDelay: 10 },
+            },
+            {
+                key: 'loaded-follow-up',
+                name: 'A Loaded Follow-Up',
+                description: 'Lets a character with established shared sexual history make one specific callback in their own register.',
+                category: EventCategory.FLAVOR,
+                priority: 30,
+                text: '',
+                actions: [{
+                    type: 'superagents.phone',
+                    behavior: 'consider',
+                    recipient: { mode: 'subject', value: '' },
+                    reason: dirtyMessageCue('{{subject}} and {{user}} have established sexual history. {{subject}} may make one loaded follow-up rooted in an exact encounter, remark, preference, joke, consequence, or unresolved detail already in canon. It can tease, provoke, complain, boast, ask, or stay deliberately understated. Shared history is not blanket consent, romance, satisfaction, or permission to invent what happened.'),
+                }],
+                condition: allStateRules(
+                    stateRule('parallel', 'characters.$subject.status', 'eq', 'off-screen'),
+                    stateRule('parallel', 'characters.$subject.availability', 'neq', 'unreachable'),
+                    stateRule('relationship', 'characters.$subject.milestones', 'contains', 'sexual intimacy established'),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 10, intervalMax: 22, probability: 0.34, cooldown: 16, initialDelay: 8 },
+            },
+            {
+                key: 'practical-question',
+                name: 'A Practical Question',
+                description: 'Creates room for an established intimate connection to ask one concrete question about logistics, preferences, or boundaries.',
+                category: EventCategory.PLOT,
+                priority: 40,
+                text: '',
+                actions: [{
+                    type: 'superagents.phone',
+                    behavior: 'consider',
+                    recipient: { mode: 'subject', value: '' },
+                    reason: dirtyMessageCue('{{subject}} may ask {{user}} one concrete question about timing, privacy, access, protection, contraception, health, preferences, boundaries, preparation, cleanup, or another practical detail that the established connection makes reasonable to discuss. Ask rather than answer for {{user}}. Do not invent a risk, prior agreement, body fact, preference, or changed boundary to justify the question.'),
+                }],
+                condition: allStateRules(
+                    stateRule('parallel', 'characters.$subject.status', 'eq', 'off-screen'),
+                    stateRule('parallel', 'characters.$subject.availability', 'neq', 'unreachable'),
+                    anyStateRules(
+                        stateRule('relationship', 'characters.$subject.milestones', 'contains', 'sexual intimacy established'),
+                        stateRule('relationship', 'characters.$subject.milestones', 'contains', 'sexual boundary explicitly established'),
+                        stateRule('relationship', 'characters.$subject.milestones', 'contains', 'sexual boundary explicitly revised'),
+                    ),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 14, intervalMax: 30, probability: 0.3, cooldown: 22, initialDelay: 10 },
+            },
+            {
+                key: 'terrible-timing',
+                name: 'Terrible Timing',
+                description: 'Lets a provocative private communication arrive only when the current context makes its timing genuinely awkward and plausible.',
+                category: EventCategory.FLAVOR,
+                priority: 34,
+                text: '',
+                actions: [{
+                    type: 'superagents.phone',
+                    behavior: 'consider',
+                    recipient: { mode: 'subject', value: '' },
+                    reason: dirtyMessageCue('If a provocative private communication from {{subject}} could plausibly reach {{user}} at a genuinely inconvenient, awkward, distracting, public, dangerous, or high-stakes moment established in the current scene, {{subject}} may initiate it now. They may know the timing is bad, exploit it, or be completely unaware. Do not invent witnesses, expose private contents to bystanders, create an interruption, or bypass realistic delivery limits merely to force the joke.'),
+                }],
+                condition: allStateRules(
+                    stateRule('parallel', 'characters.$subject.status', 'eq', 'off-screen'),
+                    stateRule('parallel', 'characters.$subject.availability', 'neq', 'unreachable'),
+                    anyStateRules(
+                        stateRule('relationship', 'characters.$subject.milestones', 'contains', 'sexual intimacy established'),
+                        allStateRules(
+                            stateRule('relationship', 'characters.$subject.attraction', 'gte', 55),
+                            stateRule('relationship', 'characters.$subject.comfort', 'gte', 30),
+                        ),
+                    ),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 16, intervalMax: 32, probability: 0.24, cooldown: 24, initialDelay: 12 },
+            },
+            {
+                key: 'almost-too-honest',
+                name: 'Almost Too Honest',
+                description: 'Lets attraction produce an unusually candid private thought while preserving the character\'s option to soften or withhold it.',
+                category: EventCategory.FLAVOR,
+                priority: 32,
+                text: '',
+                actions: [{
+                    type: 'superagents.phone',
+                    behavior: 'consider',
+                    recipient: { mode: 'subject', value: '' },
+                    reason: dirtyMessageCue('{{subject}} may communicate something unusually candid about their desire, curiosity, memory, fantasy, frustration, or intention toward {{user}}. Keep it true to what {{subject}} could admit and to what canon supports. They may state it plainly, disguise it, soften it, redirect it, or withhold it entirely. Sexual honesty is not automatically a love confession, relationship proposal, demand, or promise.'),
+                }],
+                condition: allStateRules(
+                    stateRule('parallel', 'characters.$subject.status', 'eq', 'off-screen'),
+                    stateRule('parallel', 'characters.$subject.availability', 'neq', 'unreachable'),
+                    stateRule('relationship', 'characters.$subject.attraction', 'gte', 50),
+                    anyStateRules(
+                        stateRule('relationship', 'characters.$subject.comfort', 'gte', 25),
+                        stateRule('relationship', 'characters.$subject.familiarity', 'gte', 30),
+                    ),
+                ),
+                schedule: { type: ScheduleType.RECURRING, intervalMin: 14, intervalMax: 28, probability: 0.26, cooldown: 20, initialDelay: 10 },
+            },
+        ],
+        tracks: [],
+    },
+    {
+        id: 'adaptive-prompt-starter',
+        version: 4,
         name: 'Adaptive Prompt Kit',
-        description: 'A practical Harbingers-inspired example of staged prompt composition. Prompt Base always classifies the scene; Prompt NSFW is called only when Base says it is needed. Each concise fragment has its own macro outlet for placement in an ordinary preset.',
-        tags: ['prompt routing', 'macros', 'conditional agents', 'harbingers', 'example'],
+        description: 'A practical example of staged prompt composition. Prompt Base always classifies the scene; Prompt NSFW is called only when Base says it is needed. Each concise fragment has its own macro outlet for placement in an ordinary preset.',
+        tags: ['prompt routing', 'macros', 'conditional agents', 'example'],
         setName: 'Preset — Adaptive Prompt Kit',
         stateBindings: [
             {
@@ -340,7 +1903,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 layers: [{
                     name: 'Selected author',
                     priority: 10,
-                    text: '<author_style>For this response, write in the style of {{conditionValue}}. If the author is non-English, translate the result into English.</author_style>',
+                    text: '<author_style>Write this response in the style of {{conditionValue}}. If they wrote in another language, use the style of their English translations.</author_style>',
                     condition: stateRule('base', 'author', 'exists', ''),
                 }],
             },
@@ -353,7 +1916,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 layers: [{
                     name: 'Selected focus character',
                     priority: 10,
-                    text: '<focus_character>The current focus character is {{conditionValue}}. Keep the response primarily grounded in what they perceive, feel, decide, say, and do.</focus_character>',
+                    text: '<focus_character>The focus character for this response is {{conditionValue}}. Stay close to what they notice, feel, decide, say, and do. Other characters can still act, but this character should carry the scene.</focus_character>',
                     condition: stateRule('base', 'focusCharacter', 'exists', ''),
                 }],
             },
@@ -367,31 +1930,31 @@ export const BUILT_IN_PRESETS = Object.freeze([
                     {
                         name: 'Sad',
                         priority: 10,
-                        text: '<character_mood>Let sadness influence the focus character’s reactions and behavior; it may sap initiative, make communication difficult, or turn their expectations pessimistic.</character_mood>',
+                        text: '<character_mood>The focus character is sad. Let it affect what they notice, how much energy they have, what they avoid, and how they talk. Depending on the character, they might become quiet, pessimistic, short-tempered, numb, or clingy; do not make every sad person cry or confess.</character_mood>',
                         condition: stateRule('base', 'mood', 'eq', 'sad'),
                     },
                     {
                         name: 'Angry',
                         priority: 10,
-                        text: '<character_mood>Let anger influence the focus character’s decisions and behavior; they may lose their temper, act rashly, or say something nasty.</character_mood>',
+                        text: '<character_mood>The focus character is angry. Let it affect their judgment, attention, dialogue, and choices. They might become cold, petty, reckless, sharp, cruel, or openly furious depending on who they are; not every angry character needs to shout.</character_mood>',
                         condition: stateRule('base', 'mood', 'eq', 'angry'),
                     },
                     {
                         name: 'Afraid',
                         priority: 10,
-                        text: '<character_mood>Let fear influence the focus character’s decisions and behavior; they may make paranoid assumptions, panic, flee, freeze, or lash out defensively.</character_mood>',
+                        text: '<character_mood>The focus character is afraid. Fear should affect what they notice and what they are willing to risk. They might freeze, flee, panic, make paranoid assumptions, hide it behind anger, or lash out; do not reduce fear to trembling and stammering.</character_mood>',
                         condition: stateRule('base', 'mood', 'eq', 'afraid'),
                     },
                     {
                         name: 'Romantic',
                         priority: 10,
-                        text: '<character_mood>Let romantic feeling color the focus character’s attention and choices through specific tenderness, yearning, self-consciousness, or hope that fits them. Romance does not decide {{user}}’s feelings.</character_mood>',
+                        text: '<character_mood>The focus character feels romantic. Let that show through character-specific tenderness, hope, awkwardness, yearning, or attention. Let the degree of openness fit the character.</character_mood>',
                         condition: stateRule('base', 'mood', 'eq', 'romantic'),
                     },
                     {
                         name: 'Sexy',
                         priority: 10,
-                        text: '<character_mood>Let sexual interest shape the focus character’s attention, body language, and choices in-character. Tension or desire alone does not force escalation, consent, or romance.</character_mood>',
+                        text: '<character_mood>The focus character is sexually interested. Let it affect what catches their eye, their body language, and the choices they make; they can flirt, proposition, or initiate when it fits them. Let the scene set the pace.</character_mood>',
                         condition: stateRule('base', 'mood', 'eq', 'sexy'),
                     },
                 ],
@@ -402,7 +1965,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Exposes active impairment as {{de_character_impaired}}.',
                 mode: PromptRouterMode.STACK,
                 injection: { mode: InjectionMode.MACRO, macroName: 'character_impaired' },
-                layers: [{ name: 'Impaired', priority: 10, text: '<character_condition>The focus character is impaired. Let the substance consistently affect clarity, coordination, inhibition, memory, or reaction time according to what they took and how impaired they are.</character_condition>', condition: stateRule('base', 'impaired', 'eq', true) }],
+                layers: [{ name: 'Impaired', priority: 10, text: '<character_condition>The focus character is impaired. Keep the effects of whatever they took consistent: their coordination, judgment, memory, inhibitions, speech, or reaction time may change depending on the substance and amount. Do not make them conveniently sober when the plot needs it, and do not treat impairment as automatic sexual consent.</character_condition>', condition: stateRule('base', 'impaired', 'eq', true) }],
             },
             {
                 key: 'injured-outlet',
@@ -410,7 +1973,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Exposes a recent injury as {{de_character_injured}}.',
                 mode: PromptRouterMode.STACK,
                 injection: { mode: InjectionMode.MACRO, macroName: 'character_injured' },
-                layers: [{ name: 'Recently injured', priority: 10, text: '<character_condition>The focus character has a recent injury. Keep its pain, limitations, treatment, and risk of aggravation physically present without making it their only trait.</character_condition>', condition: stateRule('base', 'injured', 'eq', true) }],
+                layers: [{ name: 'Recently injured', priority: 10, text: '<character_condition>The focus character is injured. Keep the pain, limited movement, treatment, and risk of making it worse consistent; do not forget the injury as soon as they need to fight, run, or have sex. It should affect the scene without becoming their only trait.</character_condition>', condition: stateRule('base', 'injured', 'eq', true) }],
             },
             {
                 key: 'violence-outlet',
@@ -418,7 +1981,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Exposes active violence as {{de_violence}}.',
                 mode: PromptRouterMode.STACK,
                 injection: { mode: InjectionMode.MACRO, macroName: 'violence' },
-                layers: [{ name: 'Violence', priority: 10, text: '<violence>Treat violence like an action movie when the genre supports it: dramatic, legible, and capable of moving the plot. Emphasize skill, movement, improvisation, and consequences; major characters can be hurt when it changes the story.</violence>', condition: stateRule('base', 'violence', 'eq', true) }],
+                layers: [{ name: 'Violence', priority: 10, text: '<violence>Write violence as actual action, not vague commotion. Keep positions clear and use the characters’ skill, mistakes, surroundings, and whatever is within reach. Hits should have consequences and major characters can get hurt; do not turn every movement into slow motion or every injury into gore unless the story calls for it.</violence>', condition: stateRule('base', 'violence', 'eq', true) }],
             },
             {
                 key: 'nsfw-core-outlet',
@@ -426,7 +1989,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Exposes the shared NSFW baseline as {{de_nsfw_core}}.',
                 mode: PromptRouterMode.STACK,
                 injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_core' },
-                layers: [{ name: 'NSFW', priority: 10, text: '<sexuality>When the scene is NSFW, narrate sexuality matter-of-factly and explicitly. Take time with physical detail and reactions rather than racing to climax. Do not force tenderness: sex is not automatically romance.</sexuality>', condition: stateRule('base', 'nsfw', 'eq', true) }],
+                layers: [{ name: 'NSFW', priority: 10, text: '<sexuality>Write sex clearly and explicitly, using blunt words instead of vague euphemisms. Take your time with the physical action and character-specific reactions; do not race everyone toward penetration or orgasm.</sexuality>', condition: stateRule('base', 'nsfw', 'eq', true) }],
             },
             {
                 key: 'nsfw-character-sex-outlet',
@@ -435,12 +1998,12 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 mode: PromptRouterMode.EXCLUSIVE,
                 injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_character_sex' },
                 layers: [
-                    { name: 'Male', priority: 10, text: '<nsfw_character>The focus character has male anatomy. Describe its established details and physical responses specifically rather than treating the body as generic.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'male')) },
-                    { name: 'Female', priority: 10, text: '<nsfw_character>The focus character has female anatomy. Describe its established details and physical responses specifically rather than treating the body as generic.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'female')) },
-                    { name: 'Genderless', priority: 10, text: '<nsfw_character>The focus character is genderless. Do not frame them as a man or woman; describe only the body and identity established by canon.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'genderless')) },
-                    { name: 'Nonbinary', priority: 10, text: '<nsfw_character>The focus character is nonbinary. Preserve their identity and language without inferring anatomy from gender.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'nonbinary')) },
-                    { name: 'Intersex', priority: 10, text: '<nsfw_character>The focus character is intersex. Use only their established anatomy and language; do not simplify it into a binary body or invent details.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'intersex')) },
-                    { name: 'Unknown', priority: 10, text: '<nsfw_character>The focus character’s anatomy is not established clearly enough for a specific configuration. Avoid unsupported anatomical claims.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'unknown')) },
+                    { name: 'Male', priority: 10, text: '<nsfw_character>The focus character is male. Use the body and sexual language already established for him; do not treat “male” as a complete anatomy sheet or assume his role, fertility, dominance, or stamina.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'male')) },
+                    { name: 'Female', priority: 10, text: '<nsfw_character>The focus character is female. Use the body and sexual language already established for her; do not treat “female” as a complete anatomy sheet or assume her role, fertility, submission, or stamina.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'female')) },
+                    { name: 'Genderless', priority: 10, text: '<nsfw_character>The focus character is genderless. Do not write them as a man or woman. Use only their established body, pronouns, sexual language, and physical limits.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'genderless')) },
+                    { name: 'Nonbinary', priority: 10, text: '<nsfw_character>The focus character is nonbinary. Use their established identity, pronouns, body, and preferred words; being nonbinary does not tell you what genitals they have or what kind of sex they like.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'nonbinary')) },
+                    { name: 'Intersex', priority: 10, text: '<nsfw_character>The focus character is intersex. Use the exact body and language already established for them. Do not simplify them into a male or female template, or invent whatever anatomy would make the scene easier to write.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'intersex')) },
+                    { name: 'Unknown', priority: 10, text: '<nsfw_character>The focus character\'s anatomy is unclear. Stay with visible actions and body details the story has already established; do not invent genitals, fertility, identity, or sexual role.</nsfw_character>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'characterSex', 'eq', 'unknown')) },
                 ],
             },
             {
@@ -450,10 +2013,10 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 mode: PromptRouterMode.EXCLUSIVE,
                 injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_pairing' },
                 layers: [
-                    { name: 'M/M', priority: 10, text: '<nsfw_pairing>For this m/m configuration, keep acts varied and character-specific. Anal penetration requires preparation and lubrication; account for pain, tearing risk, protection, prostate stimulation, oversensitivity, fatigue, refractory periods, and staggered orgasms when relevant.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'm/m')) },
-                    { name: 'M/F', priority: 10, text: '<nsfw_pairing>For this m/f configuration, keep acts varied and character-specific. Account for contraception, pregnancy risk, protection, preparation for anal penetration, oversensitivity, fatigue, refractory periods, and staggered orgasms when relevant.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'm/f')) },
-                    { name: 'F/F', priority: 10, text: '<nsfw_pairing>For this f/f configuration, keep acts varied and character-specific rather than defaulting to one routine. Account for lubrication, toys or barriers when established, oversensitivity, fatigue, and staggered orgasms when relevant.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'f/f')) },
-                    { name: 'Other or unclear', priority: 10, text: '<nsfw_pairing>Use the participants’ established bodies, language, preferences, and physical limits. Do not force the encounter into a binary configuration or invent anatomy to complete a familiar script.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'other_or_unclear')) },
+                    { name: 'M/M', priority: 10, text: '<nsfw_pairing>For an m/m scene, do not decide who tops or bottoms from personality or masculinity. Oral, handjobs, frotting, toys, and other acts are valid; if anal happens, use preparation and lube and keep pain, protection, prostate sensitivity, fatigue, and refractory periods realistic.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'm/m')) },
+                    { name: 'M/F', priority: 10, text: '<nsfw_pairing>For an m/f scene, do not default to penis-in-vagina sex or traditional gender roles. Oral, handjobs, fingering, toys, anal, and other acts are valid. Pregnancy risk only applies when the actual bodies and act make it possible; keep contraception, condoms, preparation, lube, fatigue, and refractory periods consistent.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'm/f')) },
+                    { name: 'F/F', priority: 10, text: '<nsfw_pairing>For an f/f scene, do not default to scissoring or make both bodies react the same way. Use hands, mouths, grinding, different positions, and established toys or barriers. Keep lube, reach, muscle fatigue, oversensitivity, and staggered orgasms physically consistent.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'f/f')) },
+                    { name: 'Other or unclear', priority: 10, text: '<nsfw_pairing>This scene does not fit cleanly into m/m, m/f, or f/f—or there is not enough information to tell. Use the bodies, identities, words, preferences, and limits the story has actually established; do not invent anatomy or squeeze everyone into a binary script.</nsfw_pairing>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'pairingType', 'eq', 'other_or_unclear')) },
                 ],
             },
             {
@@ -463,9 +2026,9 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 mode: PromptRouterMode.EXCLUSIVE,
                 injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_virginity' },
                 layers: [
-                    { name: 'Virgin character', priority: 10, text: '<nsfw_addendum>The focus character is a virgin. Let their lack of experience influence how they approach sex; they may admit it or try to hide it.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'virginity', 'eq', 'virgin_character')) },
-                    { name: 'Virgin user', priority: 10, text: '<nsfw_addendum>{{user}} is a virgin. Determine whether the focus character knows and let them respond in-character without deciding {{user}}’s feelings or reactions.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'virginity', 'eq', 'virgin_user')) },
-                    { name: 'Both virgins', priority: 10, text: '<nsfw_addendum>Both the focus character and {{user}} are virgins. Let mutual inexperience affect confidence, communication, pacing, and mistakes without deciding {{user}}’s feelings or reactions.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'virginity', 'eq', 'both')) },
+                    { name: 'Virgin character', priority: 10, text: '<nsfw_addendum>The focus character has no prior sexual experience. Let that matter without turning them helpless or childlike: they might bluff, ask questions, imitate what they think they know, make mistakes, become careful, or be surprisingly eager depending on who they are.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'virginity', 'eq', 'virgin_character')) },
+                    { name: 'Virgin user', priority: 10, text: '<nsfw_addendum>{{user}} has no prior sexual experience. The focus character only knows this if {{user}} told them or they have another believable reason to know. Let the character respond in their own way.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'virginity', 'eq', 'virgin_user')) },
+                    { name: 'Both virgins', priority: 10, text: '<nsfw_addendum>Neither the focus character nor {{user}} has prior sexual experience. Let that affect confidence, communication, pacing, and practical mistakes, but do not make them identical or automatically shy and tender.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'virginity', 'eq', 'both')) },
                 ],
             },
             {
@@ -474,7 +2037,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Exposes first-time-together guidance as {{de_nsfw_first_time}}.',
                 mode: PromptRouterMode.STACK,
                 injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_first_time' },
-                layers: [{ name: 'First time together', priority: 10, text: '<nsfw_addendum>The focus character and {{user}} have never had sex together; they do not yet know each other’s bodies or preferences.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'firstTimeTogether', 'eq', true)) }],
+                layers: [{ name: 'First time together', priority: 10, text: '<nsfw_addendum>This is the first time the focus character and {{user}} have had sex together. Even if they are experienced separately, they do not automatically know each other\'s body, preferences, limits, or habits. Let discovery, communication, wrong guesses, and adjustment matter. A first time does not need to be tender, romantic, awkward, or life-changing.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'firstTimeTogether', 'eq', true)) }],
             },
             {
                 key: 'nsfw-close-friends-outlet',
@@ -482,7 +2045,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Exposes the close-friends dynamic as {{de_nsfw_close_friends}}.',
                 mode: PromptRouterMode.STACK,
                 injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_close_friends' },
-                layers: [{ name: 'Close friends', priority: 10, text: '<nsfw_addendum>The focus character and {{user}} know each other well as close friends. Depending on their established dynamic, intimacy may bring humor, ease, awkwardness, or a strange new vulnerability.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'closeFriends', 'eq', true)) }],
+                layers: [{ name: 'Close friends', priority: 10, text: '<nsfw_addendum>The focus character and {{user}} are close friends. Their history can make sex easier, funnier, more awkward, more competitive, or unexpectedly strange depending on who they are. Keep their usual way of talking to each other.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'closeFriends', 'eq', true)) }],
             },
             {
                 key: 'nsfw-family-outlet',
@@ -490,13 +2053,13 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Exposes the family dynamic as {{de_nsfw_family}}.',
                 mode: PromptRouterMode.STACK,
                 injection: { mode: InjectionMode.MACRO, macroName: 'nsfw_family' },
-                layers: [{ name: 'Family', priority: 10, text: '<nsfw_addendum>The focus character and {{user}} are family. Treat sex as a meaningful taboo whose boundary, secrecy, conflict, or consequences follow their established relationship and setting.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'family', 'eq', true)) }],
+                layers: [{ name: 'Family', priority: 10, text: '<nsfw_addendum>The focus character and {{user}} are family. Keep their actual family dynamic and the taboo present: familiarity, hierarchy, rivalry, resentment, affection, secrecy, and practical risk can all matter depending on the story.</nsfw_addendum>', condition: allStateRules(stateRule('base', 'nsfw', 'eq', true), stateRule('nsfw', 'family', 'eq', true)) }],
             },
         ],
     },
     {
         id: 'phone-story-beats',
-        version: 1,
+        version: 2,
         name: 'Phone Story Beats',
         description: 'Optional off-screen communication beats powered by SuperAgents Phone. Each component is independent, editable, and installed disabled.',
         tags: ['phone', 'off-screen', 'communication'],
@@ -513,7 +2076,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                     type: 'superagents.phone',
                     behavior: 'consider',
                     recipient: { mode: 'active-character', value: '' },
-                    reason: '{{char}} may have a natural reason to check in with {{user}} from off-screen. Only text if they are plausibly apart and the contact fits current characterization, timing, and canon.',
+                    reason: '{{char}} may have a natural reason to check in with {{user}} while they are apart. Only send a text if they are actually off-screen from each other and the timing, relationship, and message sound like {{char}}.',
                 }],
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 8, intervalMax: 16, probability: 0.35, cooldown: 12, initialDelay: 6 },
             },
@@ -528,7 +2091,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                     type: 'superagents.phone',
                     behavior: 'consider',
                     recipient: { mode: 'active-character', value: '' },
-                    reason: 'Consider whether {{char}} would follow up through the active communication surface on a specific unresolved exchange, question, promise, disagreement, or emotional loose end already established in canon. Do not invent a loose end merely to create a message.',
+                    reason: '{{char}} may text about one specific conversation, question, promise, disagreement, or emotional loose end that is still unfinished. Use something already in the story; DON’T invent unfinished business just to produce a message.',
                 }],
                 schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 10, intervalMax: 20, probability: 0.55, cooldown: 0, initialDelay: 18 },
             },
@@ -543,7 +2106,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                     type: 'superagents.phone',
                     behavior: 'send',
                     recipient: { mode: 'active-character', value: '' },
-                    reason: '{{char}} needs to send {{user}} a concise, urgent, practical message about a concrete development supported by the current setting and canon. Make it actionable without deciding {{user}}’s response or inventing a catastrophe.',
+                    reason: '{{char}} has a concrete, urgent, practical reason to text {{user}}. Keep the message concise and give {{user}} something they can act on. DON’T invent a catastrophe or decide what {{user}} does about it.',
                 }],
                 schedule: { type: ScheduleType.ONE_SHOT, intervalMin: 18, intervalMax: 35, probability: 0.35, cooldown: 0, initialDelay: 35 },
             },
@@ -551,7 +2114,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'lives-beyond-the-scene',
-        version: 3,
+        version: 4,
         name: 'Lives Beyond the Scene',
         description: 'Surfaces character initiative, competing obligations, off-screen consequences, approaching intersections, and optional own-life Phone updates from validated Parallel Off-Screen state.',
         tags: ['initiative', 'off-screen life', 'autonomy', 'social world', 'phone'],
@@ -584,7 +2147,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'While present, lets the subject take one proportionate step toward an established goal of their own.',
                 category: EventCategory.FLAVOR,
                 priority: 25,
-                text: '<character_initiative subject="{{subject}}">Use {{subject}}\'s CURRENT PARALLEL CHARACTER STATE. If the present scene offers a plausible opening, let {{subject}} initiate one small, concrete step toward their recorded goal or next intended action. Keep it consistent with elapsed time, personality, availability, and canon. The initiative need not involve {{user}} and may create an invitation, boundary, request, refusal, departure, or NPC-to-NPC interaction. Do not decide {{user}}\'s response or complete a major irreversible outcome without setup.</character_initiative>',
+                text: '<character_initiative subject="{{subject}}">Use {{subject}}’s CURRENT PARALLEL CHARACTER STATE. If the scene gives them an opening, let {{subject}} take one small, concrete step toward their goal or next action. Match the elapsed time, personality, availability, and canon. It does not have to involve {{user}}; it might be an invitation, boundary, request, refusal, departure, or NPC-to-NPC interaction. DON’T choose {{user}}’s response or finish a major irreversible outcome without setup.</character_initiative>',
                 condition: allStateRules(
                     stateRule('parallel', 'characters.$subject.status', 'eq', 'present'),
                     stateRule('parallel', 'characters.$subject.nextAction', 'exists', ''),
@@ -597,7 +2160,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Allows an established duty, plan, or relationship to limit the subject’s availability without manufacturing drama.',
                 category: EventCategory.FLAVOR,
                 priority: 30,
-                text: '<character_initiative subject="{{subject}}">Let {{subject}}\'s recorded availability, goal, and current activity place one believable constraint on the present interaction. They may need to delay, divide attention, decline, leave, reschedule, protect another commitment, or ask for practical accommodation. Express the obligation in a character-specific way and preserve room for negotiation. Do not invent a crisis, punish {{user}}, or treat affection as unlimited availability.</character_initiative>',
+                text: '<character_initiative subject="{{subject}}">{{subject}} has their own schedule, goal, and current activity. Let one of those put a believable limit on this interaction. They may delay, split their attention, say no, leave, reschedule, protect another commitment, or ask for an accommodation. Make it sound like {{subject}} and leave room to negotiate. DON’T invent a crisis, punish {{user}}, or treat affection as unlimited availability.</character_initiative>',
                 condition: allStateRules(
                     stateRule('parallel', 'characters.$subject.status', 'eq', 'present'),
                     anyStateRules(
@@ -613,7 +2176,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Lets a small result of prior off-screen activity become perceptible through an appropriate channel.',
                 category: EventCategory.WORLD,
                 priority: 35,
-                text: '<offscreen_consequence subject="{{subject}}">Use {{subject}}\'s CURRENT PARALLEL CHARACTER STATE to surface one small consequence only if the viewpoint has a plausible way to perceive it now. Respect the recorded visibility: private information requires direct disclosure; shared information needs an appropriate social connection; public information may appear through posts, notices, witnesses, or ordinary observation; hidden information must remain hidden. Prefer evidence, changed availability, rumor, a message, or a concrete downstream effect over omniscient exposition. Preserve uncertainty and do not decide {{user}}\'s reaction.</offscreen_consequence>',
+                text: '<offscreen_consequence subject="{{subject}}">Use {{subject}}’s CURRENT PARALLEL CHARACTER STATE. Show one small consequence only if the current viewpoint has a believable way to notice it. Private information needs direct disclosure. Shared information needs the right social connection. Public information can arrive through posts, notices, witnesses, or ordinary observation. Hidden information stays hidden. Show evidence, changed availability, rumor, a message, or another concrete effect instead of explaining everything from above. Keep uncertainty intact and DON’T choose {{user}}’s reaction.</offscreen_consequence>',
                 condition: allStateRules(
                     anyStateRules(
                         stateRule('parallel', 'characters.$subject.status', 'eq', 'off-screen'),
@@ -629,7 +2192,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Gives an imminent tracked thread one restrained chance to intersect the active scene.',
                 category: EventCategory.PLOT,
                 priority: 55,
-                text: '<offscreen_intersection subject="{{subject}}">The tracked actions of {{subject}} are approaching the current scene. Introduce the next observable edge of that intersection—arrival, contact, evidence, a third party, or a consequence—without teleporting them, skipping required travel, resolving the whole thread, or forcing {{user}}\'s choices. If the viewpoint still cannot plausibly perceive it, show only an appropriate precursor.</offscreen_intersection>',
+                text: '<offscreen_intersection subject="{{subject}}">What {{subject}} is doing off-screen is about to cross into the current scene. Show the next observable edge: an arrival, contact, evidence, a third party, or a consequence. DON’T teleport anyone, skip required travel, resolve the whole thread, or choose for {{user}}. If the viewpoint cannot see the intersection yet, show only a believable warning sign.</offscreen_intersection>',
                 condition: anyStateRules(
                     stateRule('parallel', 'characters.$subject.status', 'eq', 'approaching-scene'),
                     stateRule('parallel', 'characters.$subject.relevance', 'eq', 'imminent'),
@@ -647,7 +2210,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                     type: 'superagents.phone',
                     behavior: 'consider',
                     recipient: { mode: 'subject', value: '' },
-                    reason: '{{subject}} has an independent reason to consider contacting {{user}}. Use their validated Parallel Off-Screen state, especially activity, goal, nextAction, availability, contactIntent, visibility, and socialTargets. If they text, let the message arise from their own life—a development, invitation, practical update, complaint, small success, question, photo-worthy moment, or social situation. Respect privacy and timing. Do not send merely because they miss {{user}}, and send nothing if contact would not fit.',
+                    reason: '{{subject}} may have a reason from their own life to contact {{user}}. Use their current activity, goal, next action, availability, contact intent, visibility, and social targets. A text might share a development, invitation, practical update, complaint, small win, question, photo-worthy moment, or social situation. Respect privacy and timing. DON’T text just because they miss {{user}}; send nothing if contact does not fit.',
                 }],
                 condition: allStateRules(
                     anyStateRules(
@@ -668,7 +2231,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'social-ripples',
-        version: 1,
+        version: 2,
         name: 'Social Ripples',
         description: 'Lets shareable edges of independent character lives surface through SuperAgents Feed, with privacy-aware posting and plausible social responses.',
         tags: ['feed', 'social world', 'off-screen life', 'privacy', 'relationships'],
@@ -704,7 +2267,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                     type: 'superagents.feed',
                     behavior: 'consider',
                     recipient: { mode: 'subject', value: '' },
-                    reason: 'Consider whether {{subject}} would share one authentic edge of their current independent life. Use current activity, goal, nextAction, availability, visibility, and socialTargets. The post may be mundane, funny, indirect, aesthetic, proud, guarded, practical, or socially strategic. It need not mention {{user}}. Respect privacy and withhold if this is not something {{subject}} would post.',
+                    reason: '{{subject}} may share one real piece of their life right now. Use their current activity, goal, next action, availability, visibility, and social targets. The post can be mundane, funny, indirect, pretty, proud, guarded, practical, or strategic. It does not need to mention {{user}}. Respect privacy, and post nothing if {{subject}} would keep this to themself.',
                 }],
                 condition: allStateRules(
                     anyStateRules(
@@ -726,7 +2289,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                     type: 'superagents.feed',
                     behavior: 'consider',
                     recipient: { mode: 'subject', value: '' },
-                    reason: 'Consider a socially embedded Feed moment for {{subject}}. If they post, express their own voice and current life rather than paraphrasing state. Comments may come only from established socialTargets who plausibly saw the post and would respond; zero comments is normal. Do not funnel every reaction toward {{user}}, manufacture romantic competition, or expose private information.',
+                    reason: '{{subject}} may make a Feed post rooted in their current life and written in their own voice. DON’T paraphrase the state tracker. Only established social targets who could plausibly see it may comment, and zero comments is normal. DON’T bend every reaction toward {{user}}, manufacture romantic competition, or expose private information.',
                 }],
                 condition: allStateRules(
                     stateRule('parallel', 'characters.$subject.socialTargets', 'exists', ''),
@@ -739,7 +2302,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'social-web-ripples',
-        version: 1,
+        version: 2,
         name: 'Social Web Ripples',
         description: 'Turns active NPC-to-NPC obligations, friction, alliances, and social pressure into durable story motion without assuming romance or exposing private knowledge.',
         tags: ['social web', 'relationships', 'npc', 'long-term plots', 'pressure'],
@@ -772,7 +2335,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Lets an established obligation begin affecting choices when the relationship is already under pressure.',
                 category: EventCategory.PLOT,
                 priority: 38,
-                text: '<social_web_event edge="{{subject}}→{{counterpart}}">Let the obligation from {{subject}} toward {{counterpart}} create one concrete, proportionate demand, concession, delay, invitation, refusal, or divided loyalty. Current relational pressure: {{subjectState.currentPressure}}. Preserve the established power balance and both characters\' agency. Do not invent the content of a secret or decide {{user}}\'s response.</social_web_event>',
+                text: '<social_web_event edge="{{subject}}→{{counterpart}}">{{subject}} owes {{counterpart}} something. Let that obligation produce one concrete demand, concession, delay, invitation, refusal, or split loyalty. Current pressure: {{subjectState.currentPressure}}. Keep the established power balance and both characters’ agency. DON’T invent what a secret contains or decide {{user}}’s response.</social_web_event>',
                 condition: allStateRules(
                     stateRule('web', 'relationships.$subject.obligation', 'gte', 60),
                     stateRule('web', 'relationships.$subject.pressure', 'gte', 45),
@@ -785,7 +2348,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Allows sustained private tension to leak through behavior only when the scene has a plausible way to reveal it.',
                 category: EventCategory.FLAVOR,
                 priority: 32,
-                text: '<social_web_event edge="{{subject}}→{{counterpart}}">If the current viewpoint has a plausible route to notice it, let a restrained sign of friction between {{subject}} and {{counterpart}} surface through timing, wording, avoidance, over-formality, a changed choice, or another observable detail. Public stance: {{subjectState.publicStance}}. Private stance: {{subjectState.privateStance}}. Respect visibility={{subjectState.visibility}}; hidden facts remain hidden and private facts require appropriate access.</social_web_event>',
+                text: '<social_web_event edge="{{subject}}→{{counterpart}}">If the viewpoint can plausibly notice, let some friction between {{subject}} and {{counterpart}} slip through in timing, wording, avoidance, stiff formality, a changed choice, or another visible detail. Public stance: {{subjectState.publicStance}}. Private stance: {{subjectState.privateStance}}. Respect visibility={{subjectState.visibility}}. Hidden facts stay hidden; private facts need the right access.</social_web_event>',
                 condition: allStateRules(
                     stateRule('web', 'relationships.$subject.tension', 'gte', 55),
                     stateRule('web', 'relationships.$subject.pressure', 'gte', 40),
@@ -799,7 +2362,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Uses high tension and low trust as a delayed complication rather than instantly forcing betrayal or confrontation.',
                 category: EventCategory.PLOT,
                 priority: 46,
-                text: '<social_web_event edge="{{subject}}→{{counterpart}}">Create one story complication rooted in {{subject}}\'s low trust and high tension toward {{counterpart}}. Build from the recorded pressure ({{subjectState.currentPressure}}) and last meaningful shift ({{subjectState.lastShift}}). The complication may be caution, verification, coalition-building, refusal, miscoordination, or confrontation, but do not force cruelty, betrayal, disclosure, or reconciliation.</social_web_event>',
+                text: '<social_web_event edge="{{subject}}→{{counterpart}}">{{subject}} has low trust and high tension toward {{counterpart}}. Turn that into one story complication using the current pressure ({{subjectState.currentPressure}}) and last real shift ({{subjectState.lastShift}}). It might be caution, fact-checking, coalition-building, refusal, crossed plans, or confrontation. DON’T force cruelty, betrayal, disclosure, or reconciliation.</social_web_event>',
                 condition: allStateRules(
                     stateRule('web', 'relationships.$subject.tension', 'gte', 70),
                     stateRule('web', 'relationships.$subject.trust', 'lt', 35),
@@ -812,7 +2375,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 description: 'Lets a trusted, close relationship produce help, coordination, or a meaningful constraint of its own.',
                 category: EventCategory.WORLD,
                 priority: 34,
-                text: '<social_web_event edge="{{subject}}→{{counterpart}}">Let the established bond between {{subject}} and {{counterpart}} produce one concrete downstream effect: coordination, advocacy, warning, access, protection, compromise, or a shared constraint. Use their bond types ({{subjectState.bondTypes}}), current pressure ({{subjectState.currentPressure}}), and established power balance. Keep the effect proportional and do not make their relationship exist only to serve {{user}}.</social_web_event>',
+                text: '<social_web_event edge="{{subject}}→{{counterpart}}">Let the bond between {{subject}} and {{counterpart}} actually do something: coordination, advocacy, a warning, access, protection, compromise, or a shared limitation. Use their bond types ({{subjectState.bondTypes}}), current pressure ({{subjectState.currentPressure}}), and power balance. Keep the effect proportionate. Their relationship does not exist only to serve {{user}}.</social_web_event>',
                 condition: allStateRules(
                     stateRule('web', 'relationships.$subject.trust', 'gte', 65),
                     stateRule('web', 'relationships.$subject.closeness', 'gte', 50),
@@ -825,7 +2388,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'knowledge-pressure',
-        version: 1,
+        version: 2,
         name: 'Knowledge Pressure',
         description: 'Turns established suspicion, investigation, concealment, strained cover stories, and reachable evidence into story motion without automatically exposing protected truth.',
         tags: ['knowledge', 'secrets', 'investigation', 'continuity', 'safe disclosure'],
@@ -845,7 +2408,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.FLAVOR,
                 priority: 34,
                 subject: knowledgeSubject('knowledge'),
-                text: '<knowledge_pressure capability="notice" record="{{subjectState.recordId}}" actor="{{subject}}">Let {{subject}} notice one small canon-backed inconsistency connected to this Knowledge Ledger record. Their recorded position ({{subjectState.position}}) is the ceiling of what they may infer. Show only an observable cue or guarded reaction; a private question may appear only when the current narrative viewpoint canonically has access to {{subject}}\'s inner experience. Do not confirm ground truth, quote protected ledger content, grant new knowledge, satisfy a reveal prerequisite, or expose the record to another viewpoint.</knowledge_pressure>',
+                text: '<knowledge_pressure capability="notice" record="{{subjectState.recordId}}" actor="{{subject}}">Let {{subject}} notice one small inconsistency backed by canon. Their recorded position ({{subjectState.position}}) is the most they may infer. Show an observable clue or guarded reaction. Only include a private thought if the current viewpoint already has access to {{subject}}’s inner experience. DON’T confirm the truth, quote protected ledger text, hand out new knowledge, complete a reveal prerequisite, or expose the record to another viewpoint.</knowledge_pressure>',
                 condition: knowledgeRule('knowledge', 'notice'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 10, intervalMax: 20, probability: 0.36, cooldown: 16, initialDelay: 8 },
             },
@@ -856,7 +2419,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 42,
                 subject: knowledgeSubject('knowledge'),
-                text: '<knowledge_pressure capability="investigate" record="{{subjectState.recordId}}" actor="{{subject}}">Let {{subject}} take one proportionate, reversible investigative step based only on their recorded position={{subjectState.position}} and access={{subjectState.access}}. They may ask, compare, watch, verify, or seek a plausible source. Surface that step only when the current scene or viewpoint can plausibly perceive it; otherwise preserve it as off-screen pressure without omniscient explanation. Do not hand them the answer, invent evidence, complete the investigation, satisfy a reveal prerequisite, or disclose the protected proposition in narration or dialogue.</knowledge_pressure>',
+                text: '<knowledge_pressure capability="investigate" record="{{subjectState.recordId}}" actor="{{subject}}">Let {{subject}} take one small, reversible step based only on position={{subjectState.position}} and access={{subjectState.access}}. They may ask, compare, watch, verify, or look for a plausible source. Show the step only if the scene or viewpoint can perceive it; otherwise let it remain off-screen without explaining it from above. DON’T give them the answer, invent evidence, finish the investigation, complete a reveal prerequisite, or disclose the protected truth.</knowledge_pressure>',
                 condition: knowledgeRule('knowledge', 'investigate'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 14, intervalMax: 28, probability: 0.34, cooldown: 22, initialDelay: 10 },
             },
@@ -867,7 +2430,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.FLAVOR,
                 priority: 32,
                 subject: knowledgeSubject('knowledge'),
-                text: '<knowledge_pressure capability="conceal" record="{{subjectState.recordId}}" actor="{{subject}}">Let {{subject}} take one subtle precaution or show one restrained sign of guarded behavior consistent with disclosureIntent={{subjectState.disclosureIntent}}. The behavior may protect access, redirect a question, check privacy, delay a choice, or avoid a risky topic. Do not state what they are protecting, turn caution into guilt, force a lie, or reveal protected truth through omniscient explanation.</knowledge_pressure>',
+                text: '<knowledge_pressure capability="conceal" record="{{subjectState.recordId}}" actor="{{subject}}">Let {{subject}} take one subtle precaution that fits disclosureIntent={{subjectState.disclosureIntent}}. They might protect access, redirect a question, check their privacy, delay a choice, or avoid a dangerous topic. DON’T explain what they are protecting, treat caution as guilt, force them to lie, or reveal the protected truth from an omniscient viewpoint.</knowledge_pressure>',
                 condition: knowledgeRule('knowledge', 'conceal'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 12, intervalMax: 24, probability: 0.32, cooldown: 18, initialDelay: 8 },
             },
@@ -878,7 +2441,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 44,
                 subject: knowledgeSubject('knowledge'),
-                text: '<knowledge_pressure capability="cover-strain" record="{{subjectState.recordId}}" actor="{{subject}}">Let an established cover story connected to {{subject}}\'s current suspicion develop one small mismatch, omission, timing problem, or social inconsistency that the present viewpoint could plausibly observe. Preserve {{subject}}\'s position={{subjectState.position}}: the inconsistency raises a question but neither proves the protected proposition nor identifies the lie. Do not quote hidden ledger text or force confrontation, confession, or discovery.</knowledge_pressure>',
+                text: '<knowledge_pressure capability="cover-strain" record="{{subjectState.recordId}}" actor="{{subject}}">Put one small crack in an established cover story: a mismatch, omission, timing problem, or social inconsistency the current viewpoint can actually observe. Keep {{subject}} at position={{subjectState.position}}. The crack can raise a question, but it does not prove the hidden truth or identify the lie. DON’T quote hidden ledger text or force confrontation, confession, or discovery.</knowledge_pressure>',
                 condition: knowledgeRule('knowledge', 'cover-strain'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 18, intervalMax: 34, probability: 0.28, cooldown: 26, initialDelay: 14 },
             },
@@ -889,7 +2452,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 48,
                 subject: knowledgeSubject('knowledge'),
-                text: '<knowledge_pressure capability="approach-evidence" record="{{subjectState.recordId}}" actor="{{subject}}">When the current scene or viewpoint can plausibly surface it, create one opportunity for {{subject}} to move nearer to evidence relevant to this protected record: access might become requestable, a witness reachable, a location visitable, or a contradiction checkable. This is only an opportunity. Do not claim evidence was obtained, understood, authenticated, or sufficient; do not mark any reveal prerequisite complete; do not expose the protected proposition or predetermine whether {{subject}} acts.</knowledge_pressure>',
+                text: '<knowledge_pressure capability="approach-evidence" record="{{subjectState.recordId}}" actor="{{subject}}">If the scene or viewpoint can plausibly support it, put one route toward evidence within {{subject}}’s reach: access they could request, a witness they could contact, a place they could visit, or a contradiction they could check. This is an opportunity only. DON’T claim they obtained, understood, verified, or proved anything; complete no reveal prerequisite, expose no protected truth, and DON’T decide whether {{subject}} acts.</knowledge_pressure>',
                 condition: knowledgeRule('knowledge', 'approach-evidence'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 22, intervalMax: 40, probability: 0.24, cooldown: 32, initialDelay: 16 },
             },
@@ -898,7 +2461,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'commitment-consequences',
-        version: 2,
+        version: 3,
         name: 'Commitment Consequences',
         description: 'Turns explicit Calendar status changes into bounded story consequences and can capture a concrete replacement plan established in the resulting narration without rewriting the original history.',
         tags: ['calendar', 'commitments', 'consequences', 'deadlines', 'branch aware'],
@@ -922,7 +2485,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 40,
                 oncePerSubject: true,
-                text: '<calendar_consequence status="postponed">The active persona’s Calendar explicitly marks “{{subject}}” as postponed. Let that established postponement create one proportionate logistical, emotional, social, or strategic complication connected to its known participants, location, and authored timing ({{subjectState.timeLabel}}). Do not invent who requested the delay, why it happened, whether anyone is offended, or whether the commitment will ultimately be kept.</calendar_consequence>',
+                text: '<calendar_consequence status="postponed">“{{subject}}” is postponed. Let the delay create one believable logistical, emotional, social, or strategic complication tied to its known people, place, and timing ({{subjectState.timeLabel}}). DON’T invent who asked for the delay, why it happened, whether anyone is offended, or whether the commitment will eventually be kept.</calendar_consequence>',
                 condition: calendarRule('postponed'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 2, probability: 1, cooldown: 0, initialDelay: 0 },
             },
@@ -933,7 +2496,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 48,
                 oncePerSubject: true,
-                text: '<calendar_consequence status="missed">The active persona’s Calendar explicitly marks “{{subject}}” as missed. Its authored timing is {{subjectState.timeLabel}}. Let that established missed status create one concrete, proportionate consequence: a practical obstacle, follow-up, changed expectation, social pressure, or lost opportunity supported by current canon. Do not invent the reason it was missed, assign blame, narrate off-screen facts as known, force forgiveness or anger, or decide {{user}}’s response.</calendar_consequence>',
+                text: '<calendar_consequence status="missed">“{{subject}}” was missed. Its recorded timing is {{subjectState.timeLabel}}. Give that one concrete consequence: a practical obstacle, follow-up, changed expectation, social pressure, or lost opportunity supported by canon. DON’T invent why it was missed, assign blame, reveal unknown off-screen facts, force forgiveness or anger, or decide {{user}}’s response.</calendar_consequence>',
                 condition: calendarRule('missed'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 2, probability: 1, cooldown: 0, initialDelay: 0 },
             },
@@ -944,7 +2507,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.WORLD,
                 priority: 42,
                 oncePerSubject: true,
-                text: '<calendar_consequence status="cancelled">The active persona’s Calendar explicitly marks “{{subject}}” as cancelled. Its authored timing is {{subjectState.timeLabel}}. Reflect one immediate, proportionate change in availability, coordination, opportunity, or expectation. Preserve the recorded participants and setting. Do not invent who cancelled, supply a motive, assume relief or resentment, or create a replacement commitment automatically.</calendar_consequence>',
+                text: '<calendar_consequence status="cancelled">“{{subject}}” was cancelled. Its recorded timing is {{subjectState.timeLabel}}. Show one immediate change in availability, coordination, opportunity, or expectations. Keep the recorded people and setting. DON’T invent who cancelled, supply a motive, assume relief or resentment, or automatically replace it with another commitment.</calendar_consequence>',
                 condition: calendarRule('cancelled'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 2, probability: 1, cooldown: 0, initialDelay: 0 },
             },
@@ -955,7 +2518,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.FLAVOR,
                 priority: 34,
                 oncePerSubject: true,
-                text: '<calendar_consequence status="completed">The active persona’s Calendar explicitly marks “{{subject}}” as completed. Its authored timing is {{subjectState.timeLabel}}. Let that established completion leave one modest, canon-consistent trace: changed availability, a receipt or reminder, a next practical step, a participant’s observable response, or closure of a logistical pressure. Do not invent how completion happened, add unearned success, prove trust or devotion, or decide {{user}}’s feelings.</calendar_consequence>',
+                text: '<calendar_consequence status="completed">“{{subject}}” is complete. Its recorded timing is {{subjectState.timeLabel}}. Leave one modest trace: changed availability, a receipt or reminder, a practical next step, an observable response from someone involved, or the end of a logistical pressure. DON’T invent how it happened, add unearned success, prove trust or devotion, or decide {{user}}’s feelings.</calendar_consequence>',
                 condition: calendarRule('completed'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 1, intervalMax: 2, probability: 1, cooldown: 0, initialDelay: 0 },
             },
@@ -964,7 +2527,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
     },
     {
         id: 'staged-relationship-arc',
-        version: 11,
+        version: 12,
         name: 'Relationship Progression',
         description: 'A menu of editable relationship models: romantic awareness, love under constraint, slow trust through earned access, consequence/accountability paths after betrayal, and conflicts between sincere devotion and binding duty. Canonical gates prevent scores from inventing reciprocation, forgiveness, repair, or a choice between commitments.',
         tags: ['relationship', 'romance', 'trust', 'betrayal', 'accountability', 'boundaries', 'constraints', 'devotion', 'duty', 'milestones', 'gradual change'],
@@ -1021,7 +2584,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 42,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<constraint_beat type="cost">The canonically established constraint around {{subject}}\'s acknowledged love for {{user}} has one concrete present consequence. It may alter timing, access, reputation, duty, distance, safety, or what {{subject}} is willing to risk, but it must follow the specific obstacle already in canon. Do not invent a new barrier, weaken or resolve the existing one, force disclosure, assume reciprocation, or choose for {{user}}.</constraint_beat>',
+                text: '<constraint_beat type="cost">The established barrier around {{subject}}’s love for {{user}} costs them something now. Let it affect timing, access, reputation, duty, distance, safety, or what {{subject}} will risk. Use the actual obstacle in canon. DON’T invent another barrier, weaken or solve this one, force a confession, assume {{user}} feels the same, or choose for {{user}}.</constraint_beat>',
                 condition: allStateRules(
                     stateRule('milestones', 'characters.$subject.milestones', 'contains', 'love acknowledged'),
                     stateRule('milestones', 'characters.$subject.milestones', 'contains', 'relationship constraint established'),
@@ -1036,7 +2599,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 46,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<constraint_beat type="test">The established relationship constraint has already been challenged in canon. Let one immediate choice, contradiction, or cost test its present terms for {{subject}}. Preserve the obstacle unless the story itself changes it: do not force defiance, surrender, confession, separation, reconciliation, or a decision for {{user}}. A test may intensify, clarify, or expose the cost without resolving it.</constraint_beat>',
+                text: '<constraint_beat type="test">The relationship barrier has already been challenged. Give {{subject}} one immediate choice, contradiction, or cost that tests its current terms. Keep the obstacle unless the story actually changes it. DON’T force defiance, surrender, confession, separation, reconciliation, or a decision from {{user}}. A test can sharpen or expose the problem without solving it.</constraint_beat>',
                 condition: allStateRules(
                     stateRule('milestones', 'characters.$subject.milestones', 'contains', 'relationship constraint challenged'),
                     notStateRule('milestones', 'characters.$subject.milestones', 'contains', 'relationship constraint transformed'),
@@ -1051,7 +2614,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 44,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<constraint_beat type="changed-terms">Canon has changed the form or terms of the relationship constraint. Show one practical consequence of the new arrangement for {{subject}}: an opening, a new limit, a shifted obligation, or a different risk. Transformation is not resolution. Do not assume the relationship is public, mutual, consummated, exclusive, or free of consequences, and do not decide how {{user}} responds.</constraint_beat>',
+                text: '<constraint_beat type="changed-terms">The relationship barrier has changed shape or terms. Show one practical result for {{subject}}: an opening, a new limit, a shifted obligation, or a different risk. Changed does not mean solved. DON’T assume the relationship is public, mutual, sexual, exclusive, or free of consequences, and DON’T decide how {{user}} responds.</constraint_beat>',
                 condition: allStateRules(
                     stateRule('milestones', 'characters.$subject.milestones', 'contains', 'relationship constraint transformed'),
                     notStateRule('milestones', 'characters.$subject.milestones', 'contains', 'relationship constraint resolved'),
@@ -1065,7 +2628,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 48,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<betrayal_beat type="consequence">A concrete consequence of the established betrayal affects {{subject}} and {{user}} in the present: changed access, verification, reputation, alliance, routine, confidence, grief, anger, or a practical cost grounded in what actually happened. Do not invent a second betrayal, exaggerate the original harm, force confrontation, decide {{user}}\'s feelings, or treat lingering consequences as proof that forgiveness or reconciliation must occur.</betrayal_beat>',
+                text: '<betrayal_beat type="consequence">Let the established betrayal affect the present in one concrete way: changed access, fact-checking, reputation, alliances, routine, confidence, grief, anger, or a practical cost tied to what actually happened. DON’T invent another betrayal, inflate the original harm, force a confrontation, decide {{user}}’s feelings, or treat lingering consequences as proof that forgiveness or reconciliation must happen.</betrayal_beat>',
                 condition: allStateRules(
                     betrayalEstablishedRule(),
                     noRelationshipMilestone('relationship redefined after betrayal'),
@@ -1079,7 +2642,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 52,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<betrayal_beat type="confrontation-opening">Create one plausible, bounded opening in which the established betrayal could be named, questioned, or deliberately left unaddressed. Preserve who betrayed whom and what each person currently knows. If {{user}} is the responsible party, do not speak, confess, apologize, or choose for {{user}}. If {{subject}} is responsible, they may still evade, minimize, remain silent, or approach accountability according to canon and characterization.</betrayal_beat>',
+                text: '<betrayal_beat type="confrontation-opening">Create one believable opening where the established betrayal could be named, questioned, or deliberately avoided. Keep straight who betrayed whom and what each person knows. If {{user}} is responsible, DON’T make them speak, confess, apologize, or choose. If {{subject}} is responsible, they may evade, minimize, stay silent, or move toward accountability as their character and canon support.</betrayal_beat>',
                 condition: allStateRules(
                     betrayalEstablishedRule(),
                     noRelationshipMilestone('betrayal confronted'),
@@ -1094,7 +2657,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 54,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<betrayal_beat type="accountability-choice">The betrayal has been confronted, but accountability is not yet canonically accepted. Let one present detail distinguish acknowledgment from excuse, remorse from self-protection, or explanation from responsibility. Do not manufacture absolution or condemnation. If {{user}} is responsible, present only the situation and {{subject}}\'s established response; never write {{user}}\'s admission, apology, intent, or decision.</betrayal_beat>',
+                text: '<betrayal_beat type="accountability-choice">The betrayal has been confronted, but nobody has canonically accepted accountability yet. Use one present detail to separate acknowledgment from excuses, remorse from self-protection, or explanation from responsibility. DON’T manufacture absolution or condemnation. If {{user}} is responsible, show only the situation and {{subject}}’s response; never write {{user}}’s admission, apology, intent, or decision.</betrayal_beat>',
                 condition: allStateRules(
                     relationshipMilestone('betrayal confronted'),
                     noRelationshipMilestone('accountability accepted'),
@@ -1109,7 +2672,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 50,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<betrayal_beat type="restitution">Accountability has been accepted, but repair still needs concrete evidence. Surface one proportionate opportunity, cost, boundary, or piece of follow-through that would make restitution observable. An attempt may fail, be refused, remain incomplete, or help without restoring the former relationship. If {{user}} is responsible, do not perform the reparative action for {{user}}. Do not convert effort into forgiveness, trust, access, reconciliation, or reunion.</betrayal_beat>',
+                text: '<betrayal_beat type="restitution">Accountability was accepted, but repair still needs proof. Put one reasonable opportunity, cost, boundary, or piece of follow-through on the table so restitution can be seen. The attempt may fail, be refused, stay incomplete, or help without restoring the old relationship. If {{user}} is responsible, DON’T perform the repair for them. Effort is not automatic forgiveness, trust, access, reconciliation, or reunion.</betrayal_beat>',
                 condition: allStateRules(
                     relationshipMilestone('accountability accepted'),
                     noRelationshipMilestone('restitution demonstrated'),
@@ -1124,7 +2687,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 46,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<betrayal_beat type="new-terms">The relationship has been canonically redefined after betrayal. Let one ordinary situation test the new terms: ended contact, formal distance, limited cooperation, cautious repair, altered intimacy, or another arrangement already established in the story. Preserve the actual outcome and do not decide {{user}}\'s participation in or response to those terms. Do not steer it back toward romance, friendship, forgiveness, punishment, or reunion merely because the old bond remains emotionally important.</betrayal_beat>',
+                text: '<betrayal_beat type="new-terms">The relationship has new terms after the betrayal. Let one ordinary situation test the actual arrangement: no contact, formal distance, limited cooperation, cautious repair, changed intimacy, or whatever canon established. Keep the chosen outcome and DON’T decide {{user}}’s participation or response. Emotional history alone is not a reason to steer them back toward romance, friendship, forgiveness, punishment, or reunion.</betrayal_beat>',
                 condition: relationshipMilestone('relationship redefined after betrayal'),
                 schedule: { type: ScheduleType.RECURRING, intervalMin: 22, intervalMax: 42, probability: 0.22, cooldown: 34, initialDelay: 16 },
             },
@@ -1135,7 +2698,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 44,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<devotion_duty_beat type="duty-cost">A concrete obligation already established for {{subject}} makes a present, proportionate demand that costs time, access, safety, reputation, honesty, resources, or another opportunity connected to {{user}}. Preserve both the duty and the devotion as sincere. Do not invent a new oath or institution, declare the commitments incompatible before canon does, force {{subject}} to choose, or decide {{user}}\'s reaction.</devotion_duty_beat>',
+                text: '<devotion_duty_beat type="duty-cost">An established duty makes a real demand on {{subject}} now. It costs time, access, safety, reputation, honesty, resources, or an opportunity connected to {{user}}. Treat both the duty and the devotion as sincere. DON’T invent a new oath or institution, declare the commitments incompatible before canon does, force {{subject}} to choose, or decide {{user}}’s reaction.</devotion_duty_beat>',
                 condition: allStateRules(
                     relationshipMilestone('devotion established'),
                     relationshipMilestone('duty established'),
@@ -1150,7 +2713,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 50,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<devotion_duty_beat type="conflict-due">The canonical conflict between {{subject}}\'s devotion to {{user}} and an established duty reaches one bounded decision point, deadline, divided-attention cost, or incompatible demand. Show what each commitment asks and what cannot be fully preserved in this moment. Do not choose for {{subject}}, speak or decide for {{user}}, manufacture a betrayal, or make either commitment secretly false to simplify the conflict.</devotion_duty_beat>',
+                text: '<devotion_duty_beat type="conflict-due">{{subject}}’s devotion to {{user}} and an established duty now pull in different directions. Bring them to one clear decision point, deadline, divided-attention cost, or incompatible demand. Show what each commitment asks and what cannot be preserved in this moment. DON’T choose for {{subject}}, speak or decide for {{user}}, manufacture betrayal, or make either commitment secretly false for an easy answer.</devotion_duty_beat>',
                 condition: allStateRules(
                     relationshipMilestone('devotion and duty conflict established'),
                     noRelationshipMilestone('duty chosen over devotion'),
@@ -1167,7 +2730,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.SOCIAL,
                 priority: 46,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<devotion_duty_beat type="third-party">Someone who is already connected to {{subject}}\'s established duty notices a concrete inconsistency, risk, divided loyalty, or unmet obligation and asks for clarification, assurance, boundaries, or action appropriate to their role. Give that person legitimate stakes and a distinct perspective rather than making them a disposable obstacle. Do not expose secrets they could not know, force an ultimatum, choose for {{subject}}, or decide {{user}}\'s response.</devotion_duty_beat>',
+                text: '<devotion_duty_beat type="third-party">Someone already connected to {{subject}}’s duty notices a real inconsistency, risk, divided loyalty, or unmet obligation. Let them ask for clarification, reassurance, boundaries, or action that fits their role. Give them real stakes and their own point of view; DON’T use them as a disposable obstacle. Don’t reveal secrets they could not know, force an ultimatum, choose for {{subject}}, or decide {{user}}’s response.</devotion_duty_beat>',
                 condition: allStateRules(
                     relationshipMilestone('devotion and duty conflict established'),
                     noRelationshipMilestone('devotion and duty renegotiated'),
@@ -1182,7 +2745,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 48,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<devotion_duty_beat type="choice-consequence">A canonical choice between devotion and duty has already been made. Let one specific remainder of the commitment not chosen affect the present: grief, obligation, lost access, political or family consequence, relief, resentment, practical repair, changed trust, or a continuing promise grounded in canon. Do not reverse the choice, erase its cost, call the unchosen commitment false, force regret, or decide {{user}}\'s judgment.</devotion_duty_beat>',
+                text: '<devotion_duty_beat type="choice-consequence">A choice between devotion and duty was already made. Let one remnant of the path not chosen affect the present: grief, obligation, lost access, political or family fallout, relief, resentment, practical repair, changed trust, or a promise that still matters. DON’T reverse the choice, erase its cost, call the unchosen commitment false, force regret, or decide {{user}}’s judgment.</devotion_duty_beat>',
                 condition: allStateRules(
                     anyStateRules(
                         relationshipMilestone('duty chosen over devotion'),
@@ -1199,7 +2762,7 @@ export const BUILT_IN_PRESETS = Object.freeze([
                 category: EventCategory.PLOT,
                 priority: 46,
                 subject: { mode: SubjectMode.ACTIVE_CARD, value: '' },
-                text: '<devotion_duty_beat type="renegotiated-test">Canon has changed the terms under which {{subject}} carries devotion and duty. Let one ordinary pressure test the actual arrangement: disclosure rules, divided time, recusal, delegated authority, boundaries, public conduct, contingency plans, or another term already established. Preserve what the agreement permits and forbids. Do not make the test automatically fail or succeed, declare full reconciliation, or decide {{user}}\'s cooperation.</devotion_duty_beat>',
+                text: '<devotion_duty_beat type="renegotiated-test">{{subject}} now carries devotion and duty under changed terms. Put one ordinary pressure on the real arrangement: disclosure rules, divided time, recusal, delegated authority, boundaries, public conduct, contingency plans, or another established term. Keep what the agreement allows and forbids straight. DON’T make the test automatically fail or succeed, declare everything reconciled, or decide {{user}}’s cooperation.</devotion_duty_beat>',
                 condition: allStateRules(
                     relationshipMilestone('devotion and duty renegotiated'),
                     noRelationshipMilestone('devotion and duty reconciled'),
@@ -2033,6 +3596,7 @@ export function resolvePresetEventKeys(preset, selectedKeys = null) {
         ...(preset.events || []),
         ...(preset.tracks || []),
         ...(preset.routers || []),
+        ...(preset.scripts || []),
     ];
     const requested = new Set(selectedKeys ?? definitions.map(definition => definition.key));
     let changed = true;
@@ -2077,6 +3641,8 @@ export function instantiatePresetEvents(preset, selectedKeys = null, options = {
                 fallbackSource,
             ),
             injection: { ...SYSTEM_IN_CHAT, ...(definition.injection || {}) },
+            sharedInstructionIds: (definition.sharedInstructionKeys || [])
+                .map(key => `preset:${preset.id}:${key}`),
             schedule: { ...event.schedule, ...(definition.schedule || {}) },
             capture: { ...event.capture, ...(definition.capture || {}) },
             actions: normalizeDynamicActions(definition.actions),
@@ -2089,6 +3655,7 @@ export function instantiatePresetEvents(preset, selectedKeys = null, options = {
         delete event.key;
         delete event.description;
         delete event.requires;
+        delete event.sharedInstructionKeys;
         events.push(event);
     }
     for (const event of events) {
@@ -2098,6 +3665,23 @@ export function instantiatePresetEvents(preset, selectedKeys = null, options = {
         delete event.condition.targetKey;
     }
     return events;
+}
+
+export function instantiatePresetSharedInstructions(preset, selectedKeys = null) {
+    if (!preset) throw new Error('Unknown Dynamic Events preset.');
+    const selection = new Set(resolvePresetEventKeys(preset, selectedKeys));
+    const requested = new Set((preset.events || [])
+        .filter(event => selection.has(event.key))
+        .flatMap(event => event.sharedInstructionKeys || []));
+    return (preset.sharedInstructions || [])
+        .filter(block => requested.has(block.key))
+        .map(block => createSharedInstruction({
+            id: `preset:${preset.id}:${block.key}`,
+            name: block.name,
+            text: block.text,
+            sourcePresetId: preset.id,
+            sourcePresetVersion: preset.version,
+        }));
 }
 
 function instantiatePresetSubject(definition, stateSources, fallbackSource) {
@@ -2189,6 +3773,25 @@ export function instantiatePresetRouters(preset, selectedKeys = null, options = 
     });
 }
 
+export function instantiatePresetScripts(preset, selectedKeys = null) {
+    if (!preset) throw new Error('Unknown Dynamic Events preset.');
+    const selection = new Set(resolvePresetEventKeys(preset, selectedKeys));
+    return (preset.scripts || []).filter(script => selection.has(script.key)).map(definition => {
+        const script = createScript();
+        Object.assign(script, {
+            ...definition,
+            enabled: false,
+            sourcePresetId: preset.id,
+            sourcePresetVersion: preset.version,
+            trigger: { ...script.trigger, ...(definition.trigger || {}) },
+        });
+        delete script.key;
+        delete script.description;
+        delete script.requires;
+        return script;
+    });
+}
+
 export function instantiatePreset(preset, options = {}) {
     if (!preset) throw new Error('Unknown Dynamic Events preset.');
     const set = createEventSet({
@@ -2206,8 +3809,10 @@ export function instantiatePreset(preset, options = {}) {
         presetVersion: preset.version,
     });
     set.events = instantiatePresetEvents(preset, options.selectedKeys, options);
+    set.sharedInstructions = instantiatePresetSharedInstructions(preset, options.selectedKeys);
     set.stateTracks = instantiatePresetTracks(preset, options.selectedKeys, options);
     set.promptRouters = instantiatePresetRouters(preset, options.selectedKeys, options);
+    set.scripts = instantiatePresetScripts(preset, options.selectedKeys);
     return set;
 }
 

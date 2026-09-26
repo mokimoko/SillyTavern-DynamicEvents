@@ -16,6 +16,15 @@ import {
     resolveSubject,
     SubjectMode,
 } from './src/subjects/subjects.js';
+import {
+    inspectKeywordCondition,
+    KeywordMode,
+    KeywordScope,
+} from './src/conditions/keywordMatch.js';
+import {
+    appendSharedInstructions,
+    resolveEventSharedInstructions,
+} from './src/runtime/sharedInstructions.js';
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -97,8 +106,11 @@ export const ConditionType = {
     FIRE_COUNT: 'fire-count',
     IS_SPENT: 'is-spent',
     NOT_SPENT: 'not-spent',
+    KEYWORD: 'keyword',
     PROVIDER_STATE: 'provider-state',
 };
+
+export { KeywordMode, KeywordScope };
 
 export const ConditionGroupOperator = {
     ALL: 'all',
@@ -148,10 +160,21 @@ export function createEventSet(overrides = {}) {
         bindMode: BindMode.MANUAL,
         characterBindings: [], // stores unique avatar filenames (legacy: names)
         tagBindings: [],       // stores ST native tag IDs
+        sharedInstructions: [], // reusable prompt guidance referenced by Events
         events: [],
         scripts: [],           // sibling to events: run STScript on a trigger
         stateTracks: [],       // state-derived prompt layers; do not consume event slots
         promptRouters: [],     // deterministic stacking/exclusive prompt fragments
+        ...overrides,
+    };
+}
+
+/** Create reusable guidance that Events in one set can reference. */
+export function createSharedInstruction(overrides = {}) {
+    return {
+        id: generateId('shared'),
+        name: 'New Shared Instruction',
+        text: '',
         ...overrides,
     };
 }
@@ -194,6 +217,7 @@ export function createEvent(overrides = {}) {
         category: EventCategory.FLAVOR,
         priority: 50,
         text: '',
+        sharedInstructionIds: [],
         subject: createSubject(),
         buttonActivated: false, // show a manual-trigger button in the send bar
         oncePerSubject: false,
@@ -259,6 +283,12 @@ export function createCondition(overrides = {}) {
         operator: ProviderOperator.EXISTS,
         value: '',
         subject: null,
+        keywords: [],
+        keywordScope: KeywordScope.LAST_USER,
+        keywordMode: KeywordMode.ANY,
+        keywordLookback: 4,
+        keywordCaseSensitive: false,
+        keywordWholeWords: true,
         ...overrides,
     };
 }
@@ -388,6 +418,9 @@ export function evaluateCondition(condition, chatState, context = {}) {
         case ConditionType.NOT_SPENT:
             result = targetState ? targetState.spent !== true : true;
             break;
+        case ConditionType.KEYWORD:
+            result = inspectKeywordCondition(condition, context).result;
+            break;
         case ConditionType.PROVIDER_STATE:
             result = evaluateProviderCondition(condition, context);
             break;
@@ -424,6 +457,16 @@ export function evaluateConditionDetailed(condition, chatState, context = {}) {
             invert: Boolean(condition.invert),
         };
     }
+    if (condition.type === ConditionType.KEYWORD) {
+        const detail = inspectKeywordCondition(condition, context);
+        return {
+            ...detail,
+            result: condition.invert ? !detail.result : detail.result,
+            type: condition.type,
+            invert: Boolean(condition.invert),
+            children: [],
+        };
+    }
     return {
         result: evaluateCondition(condition, chatState, context),
         type: condition.type,
@@ -457,14 +500,14 @@ export function evaluateEvents(eventSets, chatState, bindingContext, maxConcurre
     }
     const msgCount = chatState.messageCount;
     _chatStateRef = chatState; // make available to sub-evaluators
-    const baseConditionContext = { ...bindingContext, ...evaluationContext };
-    _conditionContextRef = baseConditionContext;
+    _conditionContextRef = { ...bindingContext, ...evaluationContext };
 
     // Collect all candidate events from active sets
     const candidates = [];
 
     for (const set of eventSets) {
         if (!isSetActive(set, bindingContext)) continue;
+        const baseConditionContext = { ...resolveSetBindingContext(set, bindingContext), ...evaluationContext };
 
         for (const event of set.events) {
             if (!event.enabled) continue;
@@ -509,6 +552,7 @@ export function evaluateEvents(eventSets, chatState, bindingContext, maxConcurre
             if (result.shouldFire) {
                 candidates.push({
                     event,
+                    set,
                     state,
                     subject: selectedSubject.subject,
                     counterpart: selectedSubject.counterpart,
@@ -529,7 +573,7 @@ export function evaluateEvents(eventSets, chatState, bindingContext, maxConcurre
 
     // Update state for fired events
     const texts = new Map();
-    for (const { event, state, subject, subjectKey, text } of fired) {
+    for (const { event, set, state, subject, subjectKey, text } of fired) {
         state.lastFired = msgCount;
         state.fireCount++;
         state.subjectHistory ||= {};
@@ -556,9 +600,17 @@ export function evaluateEvents(eventSets, chatState, bindingContext, maxConcurre
             }
         }
 
-        // Action-only events do not need an empty extension-prompt slot.
-        if (String(text || '').trim()) texts.set(event.id, { text, injection: event.injection });
+        const sharedInstructions = resolveEventSharedInstructions(set, event);
+        // Action-only events do not need an empty prompt slot unless they carry shared guidance.
+        if (String(text || '').trim() || sharedInstructions.length) {
+            texts.set(event.id, {
+                text,
+                injection: event.injection,
+                sharedInstructions,
+            });
+        }
     }
+    appendSharedInstructions(texts);
 
     // Replace, rather than merge, so a real evaluation also expires prompts
     // from the preceding turn. This serializable copy is the source of truth
@@ -566,7 +618,9 @@ export function evaluateEvents(eventSets, chatState, bindingContext, maxConcurre
     chatState.pendingEventInjections = Object.fromEntries(
         [...texts].map(([eventId, payload]) => [eventId, {
             text: payload.text,
+            baseText: payload.baseText ?? payload.text,
             injection: { ...payload.injection },
+            sharedInstructionIds: (payload.sharedInstructions || []).map(block => block.id),
             manual: false,
         }]),
     );
@@ -587,6 +641,16 @@ export function evaluateEvents(eventSets, chatState, bindingContext, maxConcurre
 
 function resolveEventSubjectCandidates(subject, context = {}) {
     const binding = createSubject(subject);
+    if (binding.mode === SubjectMode.STATE_VALUE) {
+        const inspected = inspectProviderCondition({
+            providerId: binding.providerId || 'superagents',
+            source: binding.source,
+            path: binding.subjectPath,
+            operator: ProviderOperator.EXISTS,
+        }, context);
+        const resolved = inspected.found ? String(inspected.actual ?? '').trim() : '';
+        return resolved ? [{ key: resolved, subject: resolved, counterpart: '', value: inspected.actual }] : [];
+    }
     if (binding.mode !== SubjectMode.STATE_SOURCE) {
         const resolved = resolveSubject(binding, context);
         return resolved ? [{ key: resolved, subject: resolved, counterpart: '', value: null }] : [];
@@ -689,9 +753,11 @@ export function evaluateScripts(eventSets, chatState, bindingContext, timing, ev
 
     for (const set of eventSets) {
         if (!isSetActive(set, bindingContext)) continue;
+        const conditionContext = { ...resolveSetBindingContext(set, bindingContext), ...evaluationContext };
 
         for (const script of (set.scripts || [])) {
             if (!script.enabled) continue;
+            if (script.builtInAction === 'time-skip') continue;
             if ((script.trigger?.timing || ScriptTiming.AFTER_AI) !== timing) continue;
 
             const state = getScriptState(chatState, script);
@@ -699,7 +765,7 @@ export function evaluateScripts(eventSets, chatState, bindingContext, timing, ev
             if (counting) state.hookTick++;
 
             // Condition gate (may reference event states)
-            if (!evaluateCondition(script.condition, chatState, { ...bindingContext, ...evaluationContext })) continue;
+            if (!evaluateCondition(script.condition, chatState, conditionContext)) continue;
 
             let shouldRun;
             if (counting) {
@@ -877,23 +943,24 @@ function evaluatePlotChain(event, state, msgCount) {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Normalize a binding context. Accepts either a plain character-name string
- * (legacy callers) or a context object { charName, avatar, tagIds }.
+ * Normalize a binding context. Accepts a legacy character-name string or
+ * the active card and group-member context from SillyTavern.
  */
 function normalizeBindingContext(ctx) {
-    if (!ctx) return { charName: '', avatar: '', tagIds: [] };
-    if (typeof ctx === 'string') return { charName: ctx, avatar: '', tagIds: [] };
+    if (!ctx) return { charName: '', avatar: '', groupId: '', groupMembers: [], tagIds: [] };
+    if (typeof ctx === 'string') return { charName: ctx, avatar: '', groupId: '', groupMembers: [], tagIds: [] };
     return {
         charName: ctx.charName || '',
         avatar: ctx.avatar || '',
+        groupId: ctx.groupId || '',
+        groupMembers: Array.isArray(ctx.groupMembers) ? ctx.groupMembers : [],
         tagIds: Array.isArray(ctx.tagIds) ? ctx.tagIds : [],
     };
 }
 
 /**
- * Match a single character binding against the active character. New bindings
- * store the unique avatar filename; legacy bindings store the character name —
- * we match either so old saved sets keep working after the avatar migration.
+ * Match a single character binding against a card. New bindings store the
+ * unique avatar filename; legacy bindings store the character name.
  */
 function matchesCharacterBinding(binding, ctx) {
     const b = String(binding || '').trim().toLowerCase();
@@ -901,11 +968,23 @@ function matchesCharacterBinding(binding, ctx) {
     return b === (ctx.avatar || '').toLowerCase() || b === (ctx.charName || '').toLowerCase();
 }
 
+/** Resolve a single character-bound group member as the set's active card. */
+export function resolveSetBindingContext(set, bindingContext) {
+    const ctx = normalizeBindingContext(bindingContext);
+    if (!ctx.groupId || set.bindMode !== BindMode.CHARACTER || !set.characterBindings?.length) {
+        return bindingContext;
+    }
+    const matches = ctx.groupMembers.filter(member =>
+        set.characterBindings.some(binding => matchesCharacterBinding(binding, member)));
+    if (matches.length !== 1) return bindingContext;
+    return { ...bindingContext, charName: matches[0].charName, avatar: matches[0].avatar };
+}
+
 /**
  * Check if an event set should be active given the current binding context.
  * @param {object} set - The event set
- * @param {object|string} bindingContext - { charName, avatar, tagIds } (or a
- *   bare character-name string for backward compatibility)
+ * @param {object|string} bindingContext - active card or group-member context
+ *   (or a bare character-name string for backward compatibility)
  */
 export function isSetActive(set, bindingContext) {
     if (!set.enabled) return false;
@@ -914,7 +993,11 @@ export function isSetActive(set, bindingContext) {
     switch (set.bindMode) {
         case BindMode.CHARACTER:
             if (!set.characterBindings?.length) return true;
-            return set.characterBindings.some(b => matchesCharacterBinding(b, ctx));
+            if (ctx.groupId) {
+                return set.characterBindings.some(binding =>
+                    ctx.groupMembers.some(member => matchesCharacterBinding(binding, member)));
+            }
+            return set.characterBindings.some(binding => matchesCharacterBinding(binding, ctx));
         case BindMode.TAG:
             if (!set.tagBindings?.length) return true;
             return set.tagBindings.some(id => ctx.tagIds.includes(id));

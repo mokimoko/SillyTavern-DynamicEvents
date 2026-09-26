@@ -43,6 +43,7 @@ export function createPopupController({ updateDrawerStatus, updateEventButtons }
         getSelectedEventId: () => state.selectedEventId,
         collapsedPhases: state.collapsedPhases,
         updateEventButtons,
+        confirm: dynevtConfirm,
     });
     configureScriptEditor({
         getSelectedScriptId: () => state.selectedScriptId,

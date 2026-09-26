@@ -172,6 +172,7 @@ export function renderScriptEditor(set) {
 
     const timing = scr.trigger.timing || ScriptTiming.AFTER_AI;
     const counting = isCountingTiming(timing);
+    const timeSkip = scr.builtInAction === 'time-skip';
 
     el.innerHTML = `
         <div class="dynevt-editor">
@@ -179,12 +180,13 @@ export function renderScriptEditor(set) {
                 <div class="dynevt-field"><label>Name</label>
                     <input type="text" class="dynevt-input" id="dynevt-scr-name" value="${esc(scr.name)}" /></div>
                 <div class="dynevt-field"><label>Trigger</label>
+                    ${timeSkip ? '<div class="dynevt-script-built-in-trigger">Manual only</div>' : `
                     <select class="dynevt-select" id="dynevt-scr-timing">
                         ${Object.values(ScriptTiming).map(t => `<option value="${t}" ${timing === t ? 'selected' : ''}>${SCRIPT_TIMING_LABELS[t]}</option>`).join('')}
-                    </select></div>
+                    </select>`}</div>
             </div>
 
-            <div class="dynevt-editor-row ${counting ? '' : 'hidden'}" id="dynevt-scr-sched">
+            <div class="dynevt-editor-row ${counting && !timeSkip ? '' : 'hidden'}" id="dynevt-scr-sched">
                 <div class="dynevt-field"><label>Every N</label>
                     <input type="number" class="dynevt-input dynevt-input-sm" id="dynevt-scr-interval" value="${scr.trigger.interval}" min="1" /></div>
                 <div class="dynevt-field"><label>Probability (%)</label>
@@ -195,11 +197,11 @@ export function renderScriptEditor(set) {
                     <input type="number" class="dynevt-input dynevt-input-sm" id="dynevt-scr-delay" value="${scr.trigger.initialDelay || 0}" min="0" /></div>
             </div>
 
-            <div class="dynevt-field">
+            ${timeSkip ? `<div class="dynevt-script-built-in-note">Privately plans an unquoted neutral narrator transition, lets you edit its text and displayed narrator name, choose the responder, then opens a playable new scene with a normal character reply. The opening direction remains active for swipes and clears after your next message. Group chats use the selected member’s exact name. If SuperAgents World State is active, its date and time are used as the baseline.</div>` : `<div class="dynevt-field">
                 <label>STScript</label>
                 <textarea class="dynevt-textarea" id="dynevt-scr-body" rows="3" placeholder="/setvar key=mood value=tense">${esc(scr.body)}</textarea>
                 <div class="dynevt-hint">Runs SillyTavern slash commands (STScript). Macros like <code>{{user}}</code> resolve at run time.</div>
-            </div>
+            </div>`}
 
             <div class="dynevt-section-label"><i class="fa-solid fa-lock" style="font-size:0.85em"></i> Condition</div>
             <div class="dynevt-cond-wrap">
