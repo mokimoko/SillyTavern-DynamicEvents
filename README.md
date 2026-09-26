@@ -324,3 +324,12 @@ Lifecycle events are:
 - `dynamicevents:track-changed`
 
 The events contain metadata only. Read state through the API.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
