@@ -76,6 +76,17 @@ function resolveResponder(candidate, responders) {
     return responders.find(name => name.toLocaleLowerCase() === requested) || responders[0] || '';
 }
 
+function recentStoryProse(chat) {
+    const excerpts = [];
+    for (let index = chat.length - 1; index >= 0 && excerpts.length < 3 && index >= chat.length - 20; index -= 1) {
+        const message = chat[index];
+        if (message?.is_system || message?.is_hidden) continue;
+        const prose = String(message?.mes ?? '').trim().slice(-450);
+        if (prose) excerpts.push(prose);
+    }
+    return excerpts.reverse();
+}
+
 function slashValue(value) {
     return `"${String(value ?? '')
         .replaceAll('"', '\\"')
@@ -83,6 +94,13 @@ function slashValue(value) {
         .replaceAll('{{', '\\{\\{')
         .replaceAll('{:', '\\{:')
         .replaceAll(':}', '\\:}')}"`;
+}
+
+function strictQuotedValue(value) {
+    return `"${String(value ?? '')
+        .replaceAll('\\', '\\\\')
+        .replaceAll('"', '\\"')
+        .replaceAll('{{', '\\{\\{')}\"`;
 }
 
 async function execute(command) {
@@ -104,14 +122,16 @@ export function getTimeSkipRoster() {
 export async function planTimeSkip({ request, worldBaseline = '' }) {
     const { responders } = currentRoster();
     if (!responders.length) throw new Error('No available character was found in this chat.');
+    const recentProse = recentStoryProse(getContext().chat || []);
     const prompt = [
         'Plan a seamless roleplay time skip using the current conversation as context.',
         `Requested transition: ${clean(request, 1200)}`,
         worldBaseline ? `Current tracked world time: ${clean(worldBaseline, 500)}` : '',
+        recentProse.length ? `Recent story prose for narrative tense and voice only: ${JSON.stringify(recentProse)}` : '',
         `Allowed responders (copy one name exactly): ${JSON.stringify(responders)}`,
         'Return only one valid JSON object with exactly these string fields:',
         '{"transition":"A concise neutral-narrator bridge of 1-3 sentences that opens at the requested time without deciding actions, thoughts, dialogue, or consent for the user character.","responder":"One exact name from the allowed responders list."}',
-        'Preserve established commitments, locations, relationships, injuries, and calendar continuity. Only summarize events during the gap when the request explicitly supplies them. Write the transition as plain prose and do not enclose it in quotation marks. Do not include markdown or commentary.',
+        'Match the established narrative tense and person in recent descriptive prose, including narration around dialogue. If the prose mixes tenses, follow the most recent scene narration. Preserve established commitments, locations, relationships, injuries, and calendar continuity. Only summarize events during the gap when the request explicitly supplies them. Write the transition as plain prose and do not enclose it in quotation marks. Do not include markdown or commentary.',
     ].filter(Boolean).join('\n\n');
     const raw = await generateQuietPrompt({
         quietPrompt: prompt,
@@ -136,7 +156,7 @@ export async function insertTimeSkipTransition(transition, narratorName = 'Narra
     const changedName = displayName !== previousName;
     if (changedName) await execute(`/sysname ${slashValue(displayName)}`);
     try {
-        await execute(`/sys ${slashValue(text)}`);
+        await execute(`/parser-flag STRICT_ESCAPING | /sys raw=false ${strictQuotedValue(text)}`);
         const chat = getContext().chat || [];
         activeTransition = { messageIndex: chat.length - 1, text };
     } finally {
